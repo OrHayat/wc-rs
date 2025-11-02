@@ -1,10 +1,18 @@
 use anyhow::{Context, Result};
+use clap::{ArgAction, Parser};
 use std::io::{self, Read};
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser};
-
 mod wc_x86;
+
+/// File statistics for word count operations
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FileCounts {
+    pub lines: usize,
+    pub words: usize,
+    pub bytes: usize,
+    pub chars: usize,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -17,6 +25,7 @@ struct WordCountArgs {
     /// Print the newline counts
     #[arg(short = 'l', long = "lines", action = ArgAction::SetTrue)]
     lines: bool,
+
     /// Print the word counts
     #[arg(short = 'w', long = "words", action = ArgAction::SetTrue)]
     words: bool,
@@ -35,7 +44,6 @@ struct WordCountArgs {
 }
 
 fn main() {
-    // Top-level error handler for clean CLI output
     if let Err(e) = run() {
         eprintln!("wc-rs: {}", e);
         std::process::exit(1);
@@ -45,32 +53,40 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = WordCountArgs::parse();
 
-    // Default flags if none are set
-    if !args.bytes && !args.chars && !args.lines && !args.words {
+    // Set default flags if none are specified
+    if !args.lines && !args.words && !args.bytes && !args.chars {
         args.lines = true;
         args.words = true;
         args.bytes = true;
     }
 
     if args.files.is_empty() {
-        // Read from stdin
-        let content = read_stdin().context("failed to read stdin")?;
-        let stats = count_file_contents(content);
-        dump_file_stats(&stats, &args, None);
+        process_stdin(&args)?;
     } else {
-        // Read each file
-        for file_path in &args.files {
-            let file_content = std::fs::read_to_string(file_path)
-                .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
-            let stats = count_file_contents(file_content);
-            dump_file_stats(&stats, &args, Some(file_path));
-        }
+        process_files(&args)?;
     }
 
     Ok(())
 }
 
-fn dump_file_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&PathBuf>) {
+fn process_stdin(args: &WordCountArgs) -> Result<()> {
+    let content = read_stdin()?;
+    let stats = count_text(&content);
+    print_stats(&stats, args, None);
+    Ok(())
+}
+
+fn process_files(args: &WordCountArgs) -> Result<()> {
+    for file_path in &args.files {
+        let content = std::fs::read_to_string(file_path)
+            .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
+        let stats = count_text(&content);
+        print_stats(&stats, args, Some(file_path));
+    }
+    Ok(())
+}
+
+fn print_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&PathBuf>) {
     if args.lines {
         print!("{}\t", stats.lines);
     }
@@ -83,57 +99,34 @@ fn dump_file_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&
     if args.bytes {
         print!("{}\t", stats.bytes);
     }
-    if let Some(path) = file_path {
-        println!("{}", path.display());
-    } else {
-        println!(); // Just print a newline for stdin
+
+    match file_path {
+        Some(path) => println!("{}", path.display()),
+        None => println!(),
     }
 }
 
-fn read_stdin() -> Result<String, std::io::Error> {
+fn read_stdin() -> Result<String> {
     let mut buffer = String::new();
-    io::stdin().read_to_string(&mut buffer)?;
+    io::stdin()
+        .read_to_string(&mut buffer)
+        .context("failed to read from stdin")?;
     Ok(buffer)
 }
-struct FileCounts {
-    lines: usize,
-    words: usize,
-    bytes: usize,
-    chars: usize,
-}
 
-fn count_file_contents(file_content: String) -> FileCounts {
-    // Try SIMD first, fallback to regular implementation
-    if let Some(simd_result) = wc_x86::count_text_simd(file_content.as_bytes()) {
-        // SANITY CHECK: Compare with regular non-SIMD version
-        let regular_counts = count_regular(&file_content);
-        if simd_result.lines != regular_counts.lines {
-            eprintln!(
-                "WARNING: SIMD lines {} != regular lines {}",
-                simd_result.lines, regular_counts.lines
-            );
-        }
-        if simd_result.words != regular_counts.words {
-            eprintln!(
-                "WARNING: SIMD words {} != regular words {}",
-                simd_result.words, regular_counts.words
-            );
-        }
-        if simd_result.chars != regular_counts.chars {
-            eprintln!(
-                "WARNING: SIMD chars {} != regular chars {}",
-                simd_result.chars, regular_counts.chars
-            );
-        }
-
+/// Count text statistics using the fastest available method (SIMD or scalar)
+fn count_text(content: &str) -> FileCounts {
+    // Try SIMD first, fallback to scalar implementation
+    if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes()) {
         return simd_result;
-    } else {
-        return count_regular(&file_content);
     }
+
+    // Fallback to scalar implementation
+    count_scalar(content)
 }
 
-// Regular non-SIMD implementation for comparison
-fn count_regular(content: &str) -> FileCounts {
+/// Scalar implementation for platforms without SIMD support
+fn count_scalar(content: &str) -> FileCounts {
     let mut lines = 0;
     let mut words = 0;
     let mut chars = 0;
