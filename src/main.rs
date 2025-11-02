@@ -77,11 +77,11 @@ fn dump_file_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&
     if args.words {
         print!("{}\t", stats.words);
     }
-    if args.bytes {
-        print!("{}\t", stats.bytes);
-    }
     if args.chars {
         print!("{}\t", stats.chars);
+    }
+    if args.bytes {
+        print!("{}\t", stats.bytes);
     }
     if let Some(path) = file_path {
         println!("{}", path.display());
