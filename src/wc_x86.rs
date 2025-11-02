@@ -22,7 +22,15 @@ struct SimdCounts {
 pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx2") {
+        if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw") {
+            let simd_result = unsafe { count_text_avx512(content) };
+            return Some(FileCounts {
+                lines: simd_result.lines,
+                words: simd_result.words,
+                bytes: content.len(),
+                chars: simd_result.chars,
+            });
+        } else if is_x86_feature_detected!("avx2") {
             let simd_result = unsafe { count_text_avx2(content) };
             return Some(FileCounts {
                 lines: simd_result.lines,
@@ -48,6 +56,135 @@ pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
 /// Helper function to check if a byte is ASCII whitespace
 fn is_ascii_whitespace(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0C | 0x0B)
+}
+
+#[cfg(target_arch = "x86_64")]
+// #[target_feature(enable = "avx512f")]
+// #[target_feature(enable = "avx512bw")]
+#[target_feature(enable = "avx512f,avx512bw")]
+unsafe fn count_text_avx512(content: &[u8]) -> SimdCounts {
+    let mut lines = 0;
+    let mut words = 0;
+    let mut chars = 0;
+
+    // SIMD vectors for comparison
+    // AVX-512 works by processing 64 bytes in parallel (double of AVX2's 32 bytes)
+    // We create "pattern vectors" filled with the same byte value to compare against.
+
+    // _mm512_set1_epi8: Creates a 512-bit vector (64 bytes) where every byte is the same value
+    // This lets us compare all 64 bytes in a chunk against '\n' simultaneously
+    let newline_vec = _mm512_set1_epi8(b'\n' as i8); // ['\n', '\n', '\n', ... 64 times]
+    let space_vec = _mm512_set1_epi8(b' ' as i8); // [' ', ' ', ' ', ... 64 times]
+    let tab_vec = _mm512_set1_epi8(b'\t' as i8); // ['\t', '\t', '\t', ... 64 times]
+    let cr_vec = _mm512_set1_epi8(b'\r' as i8); // ['\r', '\r', '\r', ... 64 times]
+    let ff_vec = _mm512_set1_epi8(0x0C as i8); // ['\f', '\f', '\f', ... 64 times] (form feed)
+    let vt_vec = _mm512_set1_epi8(0x0B as i8); // ['\v', '\v', '\v', ... 64 times] (vertical tab)
+
+    // For UTF-8 character counting: detect continuation bytes (10xxxxxx)
+    // UTF-8 continuation bytes are 0x80-0xBF (binary: 10000000 to 10111111)
+    // To detect them, we mask the top 2 bits and check if they equal 10xxxxxx
+    let utf8_cont_mask = _mm512_set1_epi8(0b11000000u8 as i8); // Mask to isolate top 2 bits
+    let utf8_cont_pattern = _mm512_set1_epi8(0b10000000u8 as i8); // Pattern 10xxxxxx
+
+    let chunks = content.len() / 64; // How many 64-byte chunks we can process
+    let mut i = 0;
+    let mut prev_was_whitespace = true; // Assume we start after whitespace for word counting
+
+    // Process 64-byte chunks with AVX-512
+    for _ in 0..chunks {
+        unsafe {
+            // Load 64 bytes from memory into a SIMD register
+            // _mm512_loadu_si512: Loads 512 bits (64 bytes) from unaligned memory
+            // "unaligned" means the data doesn't have to be at a special memory address
+            let chunk = _mm512_loadu_si512(content.as_ptr().add(i) as *const __m512i);
+
+            // Count newlines: Compare each byte in chunk with '\n'
+            // _mm512_cmpeq_epi8_mask: Compares 64 bytes simultaneously
+            // Returns a 64-bit mask where bit N is 1 if byte N was equal to the pattern
+            // This is more efficient than AVX2's approach of getting a vector result
+            let newline_mask = _mm512_cmpeq_epi8_mask(chunk, newline_vec);
+
+            // count_ones(): Counts how many bits are set in the mask = number of newlines found
+            lines += newline_mask.count_ones() as usize;
+
+            // Count UTF-8 characters by counting non-continuation bytes
+            // Strategy: UTF-8 continuation bytes have pattern 10xxxxxx
+            // We mask each byte with 11000000 to get the top 2 bits, then check if they equal 10000000
+
+            // _mm512_and_si512: Bitwise AND operation on 64 bytes simultaneously
+            // This masks out the bottom 6 bits, keeping only the top 2 bits
+            let masked_chunk = _mm512_and_si512(chunk, utf8_cont_mask);
+
+            // Compare the masked bytes with the continuation pattern (10000000)
+            let continuation_mask = _mm512_cmpeq_epi8_mask(masked_chunk, utf8_cont_pattern);
+
+            // Count non-continuation bytes = UTF-8 character count
+            // Each UTF-8 character starts with a non-continuation byte
+            chars += 64 - continuation_mask.count_ones() as usize;
+
+            // Detect whitespace for word counting (all 6 ASCII whitespace characters)
+            // We check for space, tab, carriage return, newline, form feed, and vertical tab
+            // AVX-512 allows us to use mask operations directly instead of vector OR operations
+            let space_mask = _mm512_cmpeq_epi8_mask(chunk, space_vec);
+            let tab_mask = _mm512_cmpeq_epi8_mask(chunk, tab_vec);
+            let cr_mask = _mm512_cmpeq_epi8_mask(chunk, cr_vec);
+            let newline_mask_for_words = _mm512_cmpeq_epi8_mask(chunk, newline_vec);
+            let ff_mask = _mm512_cmpeq_epi8_mask(chunk, ff_vec);
+            let vt_mask = _mm512_cmpeq_epi8_mask(chunk, vt_vec);
+
+            // Combine all whitespace masks using bitwise OR operations
+            // This is more efficient than AVX2's vector operations
+            let whitespace_mask =
+                space_mask | tab_mask | cr_mask | newline_mask_for_words | ff_mask | vt_mask;
+
+            // Count word transitions (whitespace to non-whitespace)
+            // We iterate through each bit in the mask to track word boundaries
+            for bit_idx in 0..64 {
+                // Check if this byte position is whitespace
+                let is_whitespace = (whitespace_mask & (1u64 << bit_idx)) != 0;
+
+                // A new word starts when we transition from whitespace to non-whitespace
+                if prev_was_whitespace && !is_whitespace {
+                    words += 1;
+                }
+                prev_was_whitespace = is_whitespace;
+            }
+        }
+
+        i += 64; // Move to the next 64-byte chunk
+    }
+
+    // Handle remaining bytes with scalar processing
+    // After processing all complete 64-byte chunks, we may have some leftover bytes
+    // (e.g., if file is 100 bytes, we process 64 bytes with SIMD, 36 bytes with scalar)
+    let scalar_result = count_text_scalar(&content[i..]);
+
+    // Adjust for transition from SIMD to scalar processing
+    // We need to be careful not to double-count words that span the SIMD/scalar boundary
+    if i > 0 && i < content.len() && !prev_was_whitespace {
+        // We ended SIMD processing in the middle of a word
+        let first_remaining_byte = content[i];
+        if !is_ascii_whitespace(first_remaining_byte) {
+            // The first scalar byte continues the word from SIMD, so don't double-count
+            words += scalar_result.words.saturating_sub(1);
+        } else {
+            // The first scalar byte is whitespace, so it ends the SIMD word
+            words += scalar_result.words;
+        }
+    } else {
+        // No boundary issues - just add the scalar word count
+        words += scalar_result.words;
+    }
+
+    // Add the scalar results for lines and characters
+    lines += scalar_result.lines; // lines from remaining bytes
+    chars += scalar_result.chars; // characters from remaining bytes
+
+    SimdCounts {
+        lines,
+        words,
+        chars,
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -251,7 +388,6 @@ unsafe fn count_text_sse2(content: &[u8]) -> SimdCounts {
             // Count non-continuation bytes = UTF-8 character count
             // Each UTF-8 character starts with a non-continuation byte
             chars += 16 - continuation_mask.count_ones() as usize;
-
             // Detect whitespace for word counting (all 6 ASCII whitespace characters)
             // We check for space, tab, carriage return, newline, form feed, and vertical tab simultaneously
             let space_cmp = _mm_cmpeq_epi8(chunk, space_vec);
