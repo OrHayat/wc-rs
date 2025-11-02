@@ -139,15 +139,15 @@ fn count_lines_simd(content: &[u8]) -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512bw")]  // Requires AVX-512 Byte/Word operations
+#[target_feature(enable = "avx512bw")] // Requires AVX-512 Byte/Word operations
 unsafe fn count_lines_avx512(content: &[u8]) -> usize {
     let mut lines = 0;
-    
+
     // Create a vector of 64 bytes, all set to '\n' (newline character)
     // This will be compared against each 64-byte chunk of the file
     let newline_vec = _mm512_set1_epi8(b'\n' as i8);
 
-    let chunks = content.len() / 64;  // How many 64-byte chunks we can process
+    let chunks = content.len() / 64; // How many 64-byte chunks we can process
     let mut i = 0;
 
     // Process file in 64-byte chunks using AVX-512
@@ -156,15 +156,15 @@ unsafe fn count_lines_avx512(content: &[u8]) -> usize {
             // Load 64 bytes from memory into AVX-512 register
             // _mm512_loadu_si512 = unaligned load (file data might not be 64-byte aligned)
             let chunk = _mm512_loadu_si512(content.as_ptr().add(i) as *const __m512i);
-            
+
             // Compare each of the 64 bytes in chunk with '\n'
             // Returns a 64-bit mask where bit=1 means that byte was '\n'
             let newline_cmp = _mm512_cmpeq_epi8_mask(chunk, newline_vec);
-            
+
             // Count how many bits are set in the mask = how many '\n' found
             lines += newline_cmp.count_ones() as usize;
         }
-        i += 64;  // Move to next 64-byte chunk
+        i += 64; // Move to next 64-byte chunk
     }
 
     // Handle leftover bytes that don't fill a complete 64-byte chunk
@@ -185,14 +185,14 @@ unsafe fn count_lines_avx512(content: &[u8]) -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]  // Requires AVX2 (Advanced Vector Extensions 2)
+#[target_feature(enable = "avx2")] // Requires AVX2 (Advanced Vector Extensions 2)
 unsafe fn count_lines_avx2(content: &[u8]) -> usize {
     let mut lines = 0;
-    
+
     // Create a vector of 32 bytes, all set to '\n'
     let newline_vec = _mm256_set1_epi8(b'\n' as i8);
 
-    let chunks = content.len() / 32;  // How many 32-byte chunks we can process
+    let chunks = content.len() / 32; // How many 32-byte chunks we can process
     let mut i = 0;
 
     // Process file in 32-byte chunks using AVX2
@@ -200,19 +200,19 @@ unsafe fn count_lines_avx2(content: &[u8]) -> usize {
         unsafe {
             // Load 32 bytes from memory into AVX2 register (256-bit)
             let chunk = _mm256_loadu_si256(content.as_ptr().add(i) as *const __m256i);
-            
+
             // Compare each of the 32 bytes in chunk with '\n'
             // Returns a 256-bit vector where each byte is 0xFF if match, 0x00 if no match
             let newline_cmp = _mm256_cmpeq_epi8(chunk, newline_vec);
-            
+
             // Extract the high bit of each byte to create a 32-bit mask
             // If byte was 0xFF (match), the high bit becomes 1 in the mask
             let newline_mask = _mm256_movemask_epi8(newline_cmp) as u32;
-            
+
             // Count set bits in mask = count of newlines found
             lines += newline_mask.count_ones() as usize;
         }
-        i += 32;  // Move to next 32-byte chunk
+        i += 32; // Move to next 32-byte chunk
     }
 
     // Process remaining bytes (< 32 bytes) with scalar code
@@ -231,14 +231,14 @@ unsafe fn count_lines_avx2(content: &[u8]) -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse2")]  // Requires SSE2 (available on virtually all x86_64)
+#[target_feature(enable = "sse2")] // Requires SSE2 (available on virtually all x86_64)
 unsafe fn count_lines_sse2(content: &[u8]) -> usize {
     let mut lines = 0;
-    
+
     // Create a vector of 16 bytes, all set to '\n'
     let newline_vec = _mm_set1_epi8(b'\n' as i8);
 
-    let chunks = content.len() / 16;  // How many 16-byte chunks we can process
+    let chunks = content.len() / 16; // How many 16-byte chunks we can process
     let mut i = 0;
 
     // Process file in 16-byte chunks using SSE2
@@ -246,19 +246,19 @@ unsafe fn count_lines_sse2(content: &[u8]) -> usize {
         unsafe {
             // Load 16 bytes from memory into SSE register (128-bit)
             let chunk = _mm_loadu_si128(content.as_ptr().add(i) as *const __m128i);
-            
+
             // Compare each of the 16 bytes in chunk with '\n'
             // Returns a 128-bit vector where each byte is 0xFF if match, 0x00 if no match
             let newline_cmp = _mm_cmpeq_epi8(chunk, newline_vec);
-            
+
             // Extract the high bit of each byte to create a 16-bit mask
             // Same principle as AVX2 but with 16 bytes instead of 32
             let newline_mask = _mm_movemask_epi8(newline_cmp) as u16;
-            
+
             // Count set bits in mask = count of newlines found
             lines += newline_mask.count_ones() as usize;
         }
-        i += 16;  // Move to next 16-byte chunk
+        i += 16; // Move to next 16-byte chunk
     }
 
     // Process remaining bytes (< 16 bytes) with scalar code
@@ -300,9 +300,10 @@ fn count_words_and_chars(content: &str) -> (usize, usize) {
     // Uses Rust's char iterator which correctly handles multi-byte Unicode characters
     let mut words = 0;
     let mut chars = 0;
-    let mut in_word = false;  // State machine: are we currently inside a word?
+    let mut in_word = false; // State machine: are we currently inside a word?
 
-    for ch in content.chars() {  // Iterates over Unicode characters, not bytes
+    for ch in content.chars() {
+        // Iterates over Unicode characters, not bytes
         chars += 1;
 
         if ch.is_whitespace() {
