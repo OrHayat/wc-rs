@@ -107,40 +107,33 @@ fn count_file_contents(file_content: String) -> FileCounts {
     if let Some(simd_result) = wc_x86::count_text_simd(file_content.as_bytes()) {
         // SANITY CHECK: Compare with regular non-SIMD version
         let regular_counts = count_regular(&file_content);
-        if simd_result.lines != regular_counts.0 {
+        if simd_result.lines != regular_counts.lines {
             eprintln!(
                 "WARNING: SIMD lines {} != regular lines {}",
-                simd_result.lines, regular_counts.0
+                simd_result.lines, regular_counts.lines
             );
         }
-        if simd_result.words != regular_counts.1 {
+        if simd_result.words != regular_counts.words {
             eprintln!(
                 "WARNING: SIMD words {} != regular words {}",
-                simd_result.words, regular_counts.1
+                simd_result.words, regular_counts.words
             );
         }
-        if simd_result.chars != regular_counts.2 {
+        if simd_result.chars != regular_counts.chars {
             eprintln!(
                 "WARNING: SIMD chars {} != regular chars {}",
-                simd_result.chars, regular_counts.2
+                simd_result.chars, regular_counts.chars
             );
         }
 
-        simd_result
+        return simd_result;
     } else {
-        // No SIMD available, use regular implementation
-        let regular_counts = count_regular(&file_content);
-        FileCounts {
-            lines: regular_counts.0,
-            words: regular_counts.1,
-            bytes: file_content.len(),
-            chars: regular_counts.2,
-        }
+        return count_regular(&file_content);
     }
 }
 
 // Regular non-SIMD implementation for comparison
-fn count_regular(content: &str) -> (usize, usize, usize) {
+fn count_regular(content: &str) -> FileCounts {
     let mut lines = 0;
     let mut words = 0;
     let mut chars = 0;
@@ -161,5 +154,10 @@ fn count_regular(content: &str) -> (usize, usize, usize) {
         }
     }
 
-    (lines, words, chars)
+    FileCounts {
+        lines,
+        words,
+        bytes: content.len(),
+        chars,
+    }
 }
