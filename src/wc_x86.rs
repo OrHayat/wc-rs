@@ -2,6 +2,7 @@
 //!
 //! This module contains platform-specific optimizations using:
 //! - AVX2: 32 bytes/instruction (Intel Haswell+, AMD Excavator+)
+//! - SSE2: 16 bytes/instruction (almost all x86_64 CPUs)
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
@@ -23,6 +24,14 @@ pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
     {
         if is_x86_feature_detected!("avx2") {
             let simd_result = unsafe { count_text_avx2(content) };
+            return Some(FileCounts {
+                lines: simd_result.lines,
+                words: simd_result.words,
+                bytes: content.len(),
+                chars: simd_result.chars,
+            });
+        } else if is_x86_feature_detected!("sse2") {
+            let simd_result = unsafe { count_text_sse2(content) };
             return Some(FileCounts {
                 lines: simd_result.lines,
                 words: simd_result.words,
@@ -139,6 +148,135 @@ unsafe fn count_text_avx2(content: &[u8]) -> SimdCounts {
 
     // Handle remaining bytes with scalar processing
     // After processing all complete 32-byte chunks, we may have some leftover bytes
+    // (e.g., if file is 100 bytes, we process 96 bytes with SIMD, 4 bytes with scalar)
+    let scalar_result = count_text_scalar(&content[i..]);
+
+    // Adjust for transition from SIMD to scalar processing
+    // We need to be careful not to double-count words that span the SIMD/scalar boundary
+    if i > 0 && i < content.len() && !prev_was_whitespace {
+        // We ended SIMD processing in the middle of a word
+        let first_remaining_byte = content[i];
+        if !is_ascii_whitespace(first_remaining_byte) {
+            // The first scalar byte continues the word from SIMD, so don't double-count
+            words += scalar_result.words.saturating_sub(1);
+        } else {
+            // The first scalar byte is whitespace, so it ends the SIMD word
+            words += scalar_result.words;
+        }
+    } else {
+        // No boundary issues - just add the scalar word count
+        words += scalar_result.words;
+    }
+
+    // Add the scalar results for lines and characters
+    lines += scalar_result.lines; // lines from remaining bytes
+    chars += scalar_result.chars; // characters from remaining bytes
+
+    SimdCounts {
+        lines,
+        words,
+        chars,
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn count_text_sse2(content: &[u8]) -> SimdCounts {
+    let mut lines = 0;
+    let mut words = 0;
+    let mut chars = 0;
+
+    // SIMD vectors for comparison
+    // SSE2 works by processing 16 bytes in parallel (half of AVX2's 32 bytes)
+    // We create "pattern vectors" filled with the same byte value to compare against.
+
+    // _mm_set1_epi8: Creates a 128-bit vector (16 bytes) where every byte is the same value
+    // This lets us compare all 16 bytes in a chunk against '\n' simultaneously
+    let newline_vec = _mm_set1_epi8(b'\n' as i8); // ['\n', '\n', '\n', ... 16 times]
+    let space_vec = _mm_set1_epi8(b' ' as i8); // [' ', ' ', ' ', ... 16 times]
+    let tab_vec = _mm_set1_epi8(b'\t' as i8); // ['\t', '\t', '\t', ... 16 times]
+    let cr_vec = _mm_set1_epi8(b'\r' as i8); // ['\r', '\r', '\r', ... 16 times]
+
+    // For UTF-8 character counting: detect continuation bytes (10xxxxxx)
+    // UTF-8 continuation bytes are 0x80-0xBF (binary: 10000000 to 10111111)
+    // To detect them, we mask the top 2 bits and check if they equal 10xxxxxx
+    let utf8_cont_mask = _mm_set1_epi8(0b11000000u8 as i8); // Mask to isolate top 2 bits
+    let utf8_cont_pattern = _mm_set1_epi8(0b10000000u8 as i8); // Pattern 10xxxxxx
+
+    let chunks = content.len() / 16; // How many 16-byte chunks we can process
+    let mut i = 0;
+    let mut prev_was_whitespace = true; // Assume we start after whitespace for word counting
+
+    // Process 16-byte chunks with SSE2
+    for _ in 0..chunks {
+        unsafe {
+            // Load 16 bytes from memory into a SIMD register
+            // _mm_loadu_si128: Loads 128 bits (16 bytes) from unaligned memory
+            // "unaligned" means the data doesn't have to be at a special memory address
+            let chunk = _mm_loadu_si128(content.as_ptr().add(i) as *const __m128i);
+
+            // Count newlines: Compare each byte in chunk with '\n'
+            // _mm_cmpeq_epi8: Compares 16 bytes simultaneously
+            // Returns a vector where each byte is 0xFF if equal, 0x00 if not equal
+            let newline_cmp = _mm_cmpeq_epi8(chunk, newline_vec);
+
+            // _mm_movemask_epi8: Extracts the high bit of each byte into a 16-bit mask
+            // Since 0xFF has high bit = 1 and 0x00 has high bit = 0, this gives us a bitmask
+            // where bit N is 1 if byte N was a newline
+            let newline_mask = _mm_movemask_epi8(newline_cmp) as u16;
+
+            // count_ones(): Counts how many bits are set in the mask = number of newlines found
+            lines += newline_mask.count_ones() as usize;
+
+            // Count UTF-8 characters by counting non-continuation bytes
+            // Strategy: UTF-8 continuation bytes have pattern 10xxxxxx
+            // We mask each byte with 11000000 to get the top 2 bits, then check if they equal 10000000
+
+            // _mm_and_si128: Bitwise AND operation on 16 bytes simultaneously
+            // This masks out the bottom 6 bits, keeping only the top 2 bits
+            let masked_chunk = _mm_and_si128(chunk, utf8_cont_mask);
+
+            // Compare the masked bytes with the continuation pattern (10000000)
+            let is_continuation = _mm_cmpeq_epi8(masked_chunk, utf8_cont_pattern);
+            let continuation_mask = _mm_movemask_epi8(is_continuation) as u16;
+
+            // Count non-continuation bytes = UTF-8 character count
+            // Each UTF-8 character starts with a non-continuation byte
+            chars += 16 - continuation_mask.count_ones() as usize;
+
+            // Detect whitespace for word counting (only ASCII whitespace)
+            // We check for space, tab, carriage return, and newline simultaneously
+            let space_cmp = _mm_cmpeq_epi8(chunk, space_vec);
+            let tab_cmp = _mm_cmpeq_epi8(chunk, tab_vec);
+            let cr_cmp = _mm_cmpeq_epi8(chunk, cr_vec);
+            let newline_cmp_for_words = _mm_cmpeq_epi8(chunk, newline_vec);
+
+            // Combine all whitespace comparisons using OR operations
+            // _mm_or_si128: Bitwise OR operation on 16 bytes simultaneously
+            // This combines multiple comparison results into one
+            let ws1 = _mm_or_si128(space_cmp, tab_cmp); // space OR tab
+            let ws2 = _mm_or_si128(cr_cmp, newline_cmp_for_words); // CR OR newline
+            let whitespace_mask = _mm_movemask_epi8(_mm_or_si128(ws1, ws2)) as u16;
+
+            // Count word transitions (whitespace to non-whitespace)
+            // We iterate through each bit in the mask to track word boundaries
+            for bit_idx in 0..16 {
+                // Check if this byte position is whitespace
+                let is_whitespace = (whitespace_mask & (1 << bit_idx)) != 0;
+
+                // A new word starts when we transition from whitespace to non-whitespace
+                if prev_was_whitespace && !is_whitespace {
+                    words += 1;
+                }
+                prev_was_whitespace = is_whitespace;
+            }
+        }
+
+        i += 16; // Move to the next 16-byte chunk
+    }
+
+    // Handle remaining bytes with scalar processing
+    // After processing all complete 16-byte chunks, we may have some leftover bytes
     // (e.g., if file is 100 bytes, we process 96 bytes with SIMD, 4 bytes with scalar)
     let scalar_result = count_text_scalar(&content[i..]);
 
