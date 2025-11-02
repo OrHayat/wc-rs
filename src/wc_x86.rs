@@ -149,19 +149,19 @@ unsafe fn count_text_avx2(content: &[u8]) -> SimdCounts {
         let first_remaining_byte = content[i];
         if !is_ascii_whitespace(first_remaining_byte) {
             // The first scalar byte continues the word from SIMD, so don't double-count
-            words += scalar_result.1.saturating_sub(1);
+            words += scalar_result.words.saturating_sub(1);
         } else {
             // The first scalar byte is whitespace, so it ends the SIMD word
-            words += scalar_result.1;
+            words += scalar_result.words;
         }
     } else {
         // No boundary issues - just add the scalar word count
-        words += scalar_result.1;
+        words += scalar_result.words;
     }
 
     // Add the scalar results for lines and characters
-    lines += scalar_result.0; // lines from remaining bytes
-    chars += scalar_result.2; // characters from remaining bytes
+    lines += scalar_result.lines; // lines from remaining bytes
+    chars += scalar_result.chars; // characters from remaining bytes
 
     SimdCounts {
         lines,
@@ -170,7 +170,7 @@ unsafe fn count_text_avx2(content: &[u8]) -> SimdCounts {
     }
 }
 
-fn count_text_scalar(content: &[u8]) -> (usize, usize, usize) {
+fn count_text_scalar(content: &[u8]) -> SimdCounts {
     let mut lines = 0;
     let mut words = 0;
     let mut chars = 0;
@@ -200,5 +200,9 @@ fn count_text_scalar(content: &[u8]) -> (usize, usize, usize) {
         lines += 1;
     }
 
-    (lines, words, chars)
+    SimdCounts {
+        lines,
+        words,
+        chars,
+    }
 }
