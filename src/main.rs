@@ -161,10 +161,5 @@ fn count_regular(content: &str) -> (usize, usize, usize) {
         }
     }
 
-    // wc behavior: count final line even if it doesn't end with newline
-    if !content.is_empty() && !content.ends_with('\n') {
-        lines += 1;
-    }
-
     (lines, words, chars)
 }
