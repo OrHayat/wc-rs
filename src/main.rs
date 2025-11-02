@@ -121,46 +121,62 @@ fn count_file_contents(file_content: String) -> FileCounts {
 fn count_lines_simd(content: &[u8]) -> usize {
     #[cfg(target_arch = "x86_64")]
     {
+        // Runtime CPU feature detection - picks the best available SIMD instruction set
+        // AVX-512: 64 bytes/instruction (Intel Skylake-X+, Ice Lake+, some AMD Zen 4+)
         if is_x86_feature_detected!("avx512bw") {
             return unsafe { count_lines_avx512(content) };
+        // AVX2: 32 bytes/instruction (Intel Haswell+, AMD Excavator+)
         } else if is_x86_feature_detected!("avx2") {
             return unsafe { count_lines_avx2(content) };
+        // SSE2: 16 bytes/instruction (almost all x86_64 CPUs)
         } else if is_x86_feature_detected!("sse2") {
             return unsafe { count_lines_sse2(content) };
         }
     }
 
-    // Fallback for non-x86_64 or when SIMD not available
+    // Fallback for non-x86_64 architectures or ancient CPUs without SIMD
     count_lines_scalar(content)
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512bw")]
+#[target_feature(enable = "avx512bw")]  // Requires AVX-512 Byte/Word operations
 unsafe fn count_lines_avx512(content: &[u8]) -> usize {
     let mut lines = 0;
+    
+    // Create a vector of 64 bytes, all set to '\n' (newline character)
+    // This will be compared against each 64-byte chunk of the file
     let newline_vec = _mm512_set1_epi8(b'\n' as i8);
 
-    let chunks = content.len() / 64;
+    let chunks = content.len() / 64;  // How many 64-byte chunks we can process
     let mut i = 0;
 
-    // Process 64-byte chunks with AVX-512
+    // Process file in 64-byte chunks using AVX-512
     for _ in 0..chunks {
         unsafe {
+            // Load 64 bytes from memory into AVX-512 register
+            // _mm512_loadu_si512 = unaligned load (file data might not be 64-byte aligned)
             let chunk = _mm512_loadu_si512(content.as_ptr().add(i) as *const __m512i);
+            
+            // Compare each of the 64 bytes in chunk with '\n'
+            // Returns a 64-bit mask where bit=1 means that byte was '\n'
             let newline_cmp = _mm512_cmpeq_epi8_mask(chunk, newline_vec);
+            
+            // Count how many bits are set in the mask = how many '\n' found
             lines += newline_cmp.count_ones() as usize;
         }
-        i += 64;
+        i += 64;  // Move to next 64-byte chunk
     }
 
-    // Handle remaining bytes
+    // Handle leftover bytes that don't fill a complete 64-byte chunk
+    // (e.g., if file is 100 bytes, we process 64 bytes with SIMD, 36 bytes normally)
     for &byte in &content[i..] {
         if byte == b'\n' {
             lines += 1;
         }
     }
 
-    // If the file doesn't end with a newline but has content, count the last line
+    // wc behavior: if file has content but doesn't end with '\n', count it as a line
+    // Example: "hello" (no newline) should count as 1 line
     if !content.is_empty() && !content.ends_with(&[b'\n']) {
         lines += 1;
     }
@@ -169,33 +185,44 @@ unsafe fn count_lines_avx512(content: &[u8]) -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+#[target_feature(enable = "avx2")]  // Requires AVX2 (Advanced Vector Extensions 2)
 unsafe fn count_lines_avx2(content: &[u8]) -> usize {
     let mut lines = 0;
+    
+    // Create a vector of 32 bytes, all set to '\n'
     let newline_vec = _mm256_set1_epi8(b'\n' as i8);
 
-    let chunks = content.len() / 32;
+    let chunks = content.len() / 32;  // How many 32-byte chunks we can process
     let mut i = 0;
 
-    // Process 32-byte chunks with AVX2
+    // Process file in 32-byte chunks using AVX2
     for _ in 0..chunks {
         unsafe {
+            // Load 32 bytes from memory into AVX2 register (256-bit)
             let chunk = _mm256_loadu_si256(content.as_ptr().add(i) as *const __m256i);
+            
+            // Compare each of the 32 bytes in chunk with '\n'
+            // Returns a 256-bit vector where each byte is 0xFF if match, 0x00 if no match
             let newline_cmp = _mm256_cmpeq_epi8(chunk, newline_vec);
+            
+            // Extract the high bit of each byte to create a 32-bit mask
+            // If byte was 0xFF (match), the high bit becomes 1 in the mask
             let newline_mask = _mm256_movemask_epi8(newline_cmp) as u32;
+            
+            // Count set bits in mask = count of newlines found
             lines += newline_mask.count_ones() as usize;
         }
-        i += 32;
+        i += 32;  // Move to next 32-byte chunk
     }
 
-    // Handle remaining bytes
+    // Process remaining bytes (< 32 bytes) with scalar code
     for &byte in &content[i..] {
         if byte == b'\n' {
             lines += 1;
         }
     }
 
-    // If the file doesn't end with a newline but has content, count the last line
+    // wc behavior: count final line even if it doesn't end with newline
     if !content.is_empty() && !content.ends_with(&[b'\n']) {
         lines += 1;
     }
@@ -204,33 +231,44 @@ unsafe fn count_lines_avx2(content: &[u8]) -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse2")]
+#[target_feature(enable = "sse2")]  // Requires SSE2 (available on virtually all x86_64)
 unsafe fn count_lines_sse2(content: &[u8]) -> usize {
     let mut lines = 0;
+    
+    // Create a vector of 16 bytes, all set to '\n'
     let newline_vec = _mm_set1_epi8(b'\n' as i8);
 
-    let chunks = content.len() / 16;
+    let chunks = content.len() / 16;  // How many 16-byte chunks we can process
     let mut i = 0;
 
-    // Process 16-byte chunks with SSE2
+    // Process file in 16-byte chunks using SSE2
     for _ in 0..chunks {
         unsafe {
+            // Load 16 bytes from memory into SSE register (128-bit)
             let chunk = _mm_loadu_si128(content.as_ptr().add(i) as *const __m128i);
+            
+            // Compare each of the 16 bytes in chunk with '\n'
+            // Returns a 128-bit vector where each byte is 0xFF if match, 0x00 if no match
             let newline_cmp = _mm_cmpeq_epi8(chunk, newline_vec);
+            
+            // Extract the high bit of each byte to create a 16-bit mask
+            // Same principle as AVX2 but with 16 bytes instead of 32
             let newline_mask = _mm_movemask_epi8(newline_cmp) as u16;
+            
+            // Count set bits in mask = count of newlines found
             lines += newline_mask.count_ones() as usize;
         }
-        i += 16;
+        i += 16;  // Move to next 16-byte chunk
     }
 
-    // Handle remaining bytes
+    // Process remaining bytes (< 16 bytes) with scalar code
     for &byte in &content[i..] {
         if byte == b'\n' {
             lines += 1;
         }
     }
 
-    // If the file doesn't end with a newline but has content, count the last line
+    // wc behavior: count final line even if it doesn't end with newline
     if !content.is_empty() && !content.ends_with(&[b'\n']) {
         lines += 1;
     }
@@ -239,6 +277,8 @@ unsafe fn count_lines_sse2(content: &[u8]) -> usize {
 }
 
 fn count_lines_scalar(content: &[u8]) -> usize {
+    // Simple byte-by-byte line counting for CPUs without SIMD support
+    // Also used for very small files where SIMD overhead isn't worth it
     let mut lines = 0;
 
     for &byte in content {
@@ -247,7 +287,7 @@ fn count_lines_scalar(content: &[u8]) -> usize {
         }
     }
 
-    // If the file doesn't end with a newline but has content, count the last line
+    // wc behavior: count final line even if it doesn't end with newline
     if !content.is_empty() && !content.ends_with(&[b'\n']) {
         lines += 1;
     }
@@ -256,19 +296,24 @@ fn count_lines_scalar(content: &[u8]) -> usize {
 }
 
 fn count_words_and_chars(content: &str) -> (usize, usize) {
+    // Word and character counting with proper UTF-8 support
+    // Uses Rust's char iterator which correctly handles multi-byte Unicode characters
     let mut words = 0;
     let mut chars = 0;
-    let mut in_word = false;
+    let mut in_word = false;  // State machine: are we currently inside a word?
 
-    for ch in content.chars() {
+    for ch in content.chars() {  // Iterates over Unicode characters, not bytes
         chars += 1;
 
         if ch.is_whitespace() {
+            // Found whitespace: end current word (if any)
             in_word = false;
         } else if !in_word {
+            // Found non-whitespace after whitespace: start new word
             words += 1;
             in_word = true;
         }
+        // If in_word==true and ch is not whitespace: continue current word (no action)
     }
 
     (words, chars)
