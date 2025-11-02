@@ -47,7 +47,7 @@ pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
 
 /// Helper function to check if a byte is ASCII whitespace
 fn is_ascii_whitespace(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0C | 0x0B)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -67,6 +67,8 @@ unsafe fn count_text_avx2(content: &[u8]) -> SimdCounts {
     let space_vec = _mm256_set1_epi8(b' ' as i8); // [' ', ' ', ' ', ... 32 times]
     let tab_vec = _mm256_set1_epi8(b'\t' as i8); // ['\t', '\t', '\t', ... 32 times]
     let cr_vec = _mm256_set1_epi8(b'\r' as i8); // ['\r', '\r', '\r', ... 32 times]
+    let ff_vec = _mm256_set1_epi8(0x0C as i8); // ['\f', '\f', '\f', ... 32 times] (form feed)
+    let vt_vec = _mm256_set1_epi8(0x0B as i8); // ['\v', '\v', '\v', ... 32 times] (vertical tab)
 
     // For UTF-8 character counting: detect continuation bytes (10xxxxxx)
     // UTF-8 continuation bytes are 0x80-0xBF (binary: 10000000 to 10111111)
@@ -115,19 +117,23 @@ unsafe fn count_text_avx2(content: &[u8]) -> SimdCounts {
             // Each UTF-8 character starts with a non-continuation byte
             chars += 32 - continuation_mask.count_ones() as usize;
 
-            // Detect whitespace for word counting (only ASCII whitespace)
-            // We check for space, tab, carriage return, and newline simultaneously
+            // Detect whitespace for word counting (all 6 ASCII whitespace characters)
+            // We check for space, tab, carriage return, newline, form feed, and vertical tab simultaneously
             let space_cmp = _mm256_cmpeq_epi8(chunk, space_vec);
             let tab_cmp = _mm256_cmpeq_epi8(chunk, tab_vec);
             let cr_cmp = _mm256_cmpeq_epi8(chunk, cr_vec);
             let newline_cmp_for_words = _mm256_cmpeq_epi8(chunk, newline_vec);
+            let ff_cmp = _mm256_cmpeq_epi8(chunk, ff_vec);
+            let vt_cmp = _mm256_cmpeq_epi8(chunk, vt_vec);
 
             // Combine all whitespace comparisons using OR operations
             // _mm256_or_si256: Bitwise OR operation on 32 bytes simultaneously
             // This combines multiple comparison results into one
             let ws1 = _mm256_or_si256(space_cmp, tab_cmp); // space OR tab
             let ws2 = _mm256_or_si256(cr_cmp, newline_cmp_for_words); // CR OR newline
-            let whitespace_mask = _mm256_movemask_epi8(_mm256_or_si256(ws1, ws2)) as u32;
+            let ws3 = _mm256_or_si256(ff_cmp, vt_cmp); // form feed OR vertical tab
+            let ws_combined = _mm256_or_si256(ws1, ws2); // (space|tab) OR (CR|newline)
+            let whitespace_mask = _mm256_movemask_epi8(_mm256_or_si256(ws_combined, ws3)) as u32;
 
             // Count word transitions (whitespace to non-whitespace)
             // We iterate through each bit in the mask to track word boundaries
@@ -196,6 +202,8 @@ unsafe fn count_text_sse2(content: &[u8]) -> SimdCounts {
     let space_vec = _mm_set1_epi8(b' ' as i8); // [' ', ' ', ' ', ... 16 times]
     let tab_vec = _mm_set1_epi8(b'\t' as i8); // ['\t', '\t', '\t', ... 16 times]
     let cr_vec = _mm_set1_epi8(b'\r' as i8); // ['\r', '\r', '\r', ... 16 times]
+    let ff_vec = _mm_set1_epi8(0x0C as i8); // ['\f', '\f', '\f', ... 16 times] (form feed)
+    let vt_vec = _mm_set1_epi8(0x0B as i8); // ['\v', '\v', '\v', ... 16 times] (vertical tab)
 
     // For UTF-8 character counting: detect continuation bytes (10xxxxxx)
     // UTF-8 continuation bytes are 0x80-0xBF (binary: 10000000 to 10111111)
@@ -244,19 +252,23 @@ unsafe fn count_text_sse2(content: &[u8]) -> SimdCounts {
             // Each UTF-8 character starts with a non-continuation byte
             chars += 16 - continuation_mask.count_ones() as usize;
 
-            // Detect whitespace for word counting (only ASCII whitespace)
-            // We check for space, tab, carriage return, and newline simultaneously
+            // Detect whitespace for word counting (all 6 ASCII whitespace characters)
+            // We check for space, tab, carriage return, newline, form feed, and vertical tab simultaneously
             let space_cmp = _mm_cmpeq_epi8(chunk, space_vec);
             let tab_cmp = _mm_cmpeq_epi8(chunk, tab_vec);
             let cr_cmp = _mm_cmpeq_epi8(chunk, cr_vec);
             let newline_cmp_for_words = _mm_cmpeq_epi8(chunk, newline_vec);
+            let ff_cmp = _mm_cmpeq_epi8(chunk, ff_vec);
+            let vt_cmp = _mm_cmpeq_epi8(chunk, vt_vec);
 
             // Combine all whitespace comparisons using OR operations
             // _mm_or_si128: Bitwise OR operation on 16 bytes simultaneously
             // This combines multiple comparison results into one
             let ws1 = _mm_or_si128(space_cmp, tab_cmp); // space OR tab
             let ws2 = _mm_or_si128(cr_cmp, newline_cmp_for_words); // CR OR newline
-            let whitespace_mask = _mm_movemask_epi8(_mm_or_si128(ws1, ws2)) as u16;
+            let ws3 = _mm_or_si128(ff_cmp, vt_cmp); // form feed OR vertical tab
+            let ws_combined = _mm_or_si128(ws1, ws2); // (space|tab) OR (CR|newline)
+            let whitespace_mask = _mm_movemask_epi8(_mm_or_si128(ws_combined, ws3)) as u16;
 
             // Count word transitions (whitespace to non-whitespace)
             // We iterate through each bit in the mask to track word boundaries
@@ -331,11 +343,6 @@ fn count_text_scalar(content: &[u8]) -> SimdCounts {
             words += 1;
             in_word = true;
         }
-    }
-
-    // wc behavior: count final line even if it doesn't end with newline
-    if !content.is_empty() && !content.ends_with(&[b'\n']) {
-        lines += 1;
     }
 
     SimdCounts {
