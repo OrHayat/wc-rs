@@ -6,8 +6,10 @@
 
 - **NEON** (128-bit): Universal on all ARM64. Processes 16 bytes/cycle. Available everywhere (phones, laptops, cloud).
 - **Crypto Extensions**: AES/SHA instructions for fast bit manipulation. Available on most modern ARM64 (Apple Silicon, newer phones).
-- **SVE** (Scalable Vector Ext): 128-2048 bit vectors, runtime-sized. Cloud/server only (AWS Graviton3).
+- **SVE** (Scalable Vector Ext): 128-2048 bit vectors, runtime-sized. Cloud/server only (AWS Graviton3). Future consumer chips may adopt.
 - **SVE2**: Enhanced SVE with more instructions. Latest cloud hardware only (AWS Graviton4).
+
+**Note**: Apple M4 added SME (Scalable Matrix Extensions) for AI/ML, but that's matrix math - not useful for text processing. We need SVE (vector ops).
 
 **NEON-Specific Problem**: Unlike x86's `_mm_movemask_epi8`, NEON has no instruction to extract comparison results as bitmasks. Need workarounds: scalar extraction (slow), horizontal adds (packed), or table lookups (vtbl).
 
@@ -27,17 +29,36 @@
 
 ---
 
-## Current Implementation Status
+## Current Implementation: NEON SIMD (16 bytes/cycle)
 
-### ✅ **Movemask Optimization Complete**
+**Challenge**: NEON lacks native movemask instruction to extract comparison bitmasks (unlike x86's `_mm_movemask_epi8`).
 
-**Problem**: Emulated movemask used 16 scalar lane extractions + branches, bottlenecked at ~12x speedup.
+**Movemask Solutions**: Three approaches being tested - emulated (scalar extraction, ~12x), packed (horizontal adds, ~16x), vtbl (table lookup, TBD).
 
-**Solution**: Pure NEON packed movemask using horizontal adds (vshr→vmul→vpaddl chain), eliminates scalar loops.
+**Core Logic**: Process 16 bytes in parallel with NEON comparisons → extract bitmask → count transitions.
+- **UTF-8 chars**: Bytes with high bit set (≥0x80) are continuation bytes; count chars = total bytes - continuation bytes.
+- **Whitespace**: NEON compares against space/tab/newline/CR simultaneously, creates mask of whitespace positions.
+- **Word counting**: Count transitions in bitmask where whitespace bit → non-whitespace bit (each = new word).
 
 **Implementation**: Declarative macro `generate_neon_counter!` creates identical NEON functions differing only in movemask strategy. Three variants: emulated (reference), packed (active), vtbl (planned).
 
 **Status**: Packed variant active in `count_text_neon()`, others marked `#[allow(dead_code)]` for benchmarking.
+
+---
+
+## Planned Implementation: Crypto Extensions (20x target)
+
+**Challenge**: Use AES/SHA instructions for fast bit manipulation to accelerate bitmask operations beyond pure NEON.
+
+**Status**: Not yet started. Requires testing on Apple Silicon (M1+) or newer ARM64 chips with Crypto Extensions.
+
+---
+
+## Planned Implementation: SVE/SVE2 (32-50x target)
+
+**Challenge**: Scalable vectors process 128-2048 bits per cycle (runtime-determined width), dramatically increase parallelism.
+
+**Status**: Cloud-only testing required (AWS Graviton3 for SVE, Graviton4 for SVE2). Consumer chips (Apple M5/M6) may add SVE in future.
 
 ---
 
