@@ -31,6 +31,9 @@
 
 ## Current Implementation: NEON SIMD (16 bytes/cycle)
 
+
+**Implementation**: Declarative macro `generate_neon_counter!` creates identical NEON functions differing only in movemask strategy. Three variants: emulated (reference), packed (active), vtbl .
+
 **Challenge**: NEON lacks native movemask instruction to extract comparison bitmasks (unlike x86's `_mm_movemask_epi8`).
 
 **Movemask Solutions**: Three approaches being tested - emulated (scalar extraction, ~12x), packed (horizontal adds, ~16x), vtbl (table lookup, TBD).
@@ -40,9 +43,18 @@
 - **Whitespace**: NEON compares against space/tab/newline/CR simultaneously, creates mask of whitespace positions.
 - **Word counting**: Count transitions in bitmask where whitespace bit → non-whitespace bit (each = new word).
 
-**Implementation**: Declarative macro `generate_neon_counter!` creates identical NEON functions differing only in movemask strategy. Three variants: emulated (reference), packed (active), vtbl (planned).
 
-**Status**: Packed variant active in `count_text_neon()`, others marked `#[allow(dead_code)]` for benchmarking.
+### NEON Intrinsics Stability Issue: vtbl-based Movemask
+
+Some NEON intrinsics required for optimal vtbl-based movemask (such as `vreinterpret_u8_u64`, `vtbl1_u8`) are not available in stable Rust. This limits the ability to implement the fastest movemask variant directly in Rust.
+
+See [Rust GitHub issue #18880](https://github.com/rust-lang/rust/issues/18880) for details.
+
+**Options to handle this limitation:**
+
+1. **Use packed or emulated movemask variants in pure Rust:** These are fully stable and portable, but may be slightly less optimal than the vtbl-based approach.
+2. **Write only the movemask function in C:** Use ARM NEON intrinsics in C for the movemask, and link it to Rust via FFI. This allows full performance for the movemask while keeping the rest of your SIMD logic in Rust.
+3. **Use nightly Rust:** Enable unstable features to access more NEON intrinsics. This is a tradeoff—nightly Rust may be perfectly acceptable for apps, personal tools, or non-production use cases where users do not require long-term stability guarantees.
 
 ---
 

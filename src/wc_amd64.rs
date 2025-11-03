@@ -237,6 +237,50 @@ generate_neon_counter! {
     variant: "EMULATED"
 }
 
+generate_neon_counter! {
+    fn_name: count_text_neon_vtbl_impl,
+    movemask: neon_movemask_u8x16_vtbl,
+    variant: "VTBL"
+}
+// ============================================================================
+// VTBL: NEON movemask using VTBL instruction 
+// // ============================================================================
+// #[cfg(target_arch = "aarch64")]
+// #[target_feature(enable = "neon")]
+// unsafe fn neon_movemask_u8x16_vtbl(vec: uint8x16_t) -> u16 {
+//     // Step 1: Shift right to get high bits in LSB
+//     let shifted = vshrq_n_u8(vec, 7);
+
+//     // Step 2: Prepare lookup table for bit positions
+//     // This table maps each byte index to its corresponding bit position
+//     // for example, byte 0 -> 1<<0, byte 1 -> 1<<1, ..., byte 15 -> 1<<15
+//     let table: [u8; 16] = [
+//         1 << 0,  1 << 1,
+//         1 << 2,  1 << 3,
+//         1 << 4,  1 << 5,
+//         1 << 6,  1 << 7,
+//         1 << 8,  1 << 9,
+//         1 << 10, 1 << 11,
+//         1 << 12, 1 << 13,
+//         1 << 14, 1 << 15,
+//     ];
+//     let table_vec = unsafe { vld1q_u8(table.as_ptr()) };
+
+//     // Step 3: Use vtbl to select bit positions for each lane
+//     let low = vget_low_u8(shifted);
+//     let high = vget_high_u8(shifted);
+    
+//     let low_mask = vtbl1_u8(vreinterpret_u8_u64(table_vec), low);
+//     let high_mask = vtbl1_u8(vreinterpret_u8_u64(table_vec), high);
+
+//     // Step 4: Sum up the selected bits to form the mask
+//     let mut mask: u16 = 0;
+//     for i in 0..8 {
+//         mask |= (low_mask[i] as u16);
+//         mask |= (high_mask[i] as u16);
+//     }
+//     mask
+// }
 // ============================================================================
 // PACKED: Pure NEON bit extraction (NEW IMPLEMENTATION)
 // ============================================================================
