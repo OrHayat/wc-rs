@@ -258,6 +258,47 @@ unsafe fn avx512_extract_continuation_mask(
     _mm512_cmpeq_epi8_mask(masked_chunk, utf8_cont_pattern)
 }
 
+/// Extract combined whitespace mask using AVX-512 instructions
+///
+/// This function detects all ASCII whitespace characters in a 64-byte chunk by comparing
+/// against all 6 whitespace types and combining the results into a single mask.
+///
+/// # ASCII Whitespace Characters Detected
+/// - Space (0x20): Most common whitespace
+/// - Tab (0x09): Horizontal tab character
+/// - Newline (0x0A): Line feed character
+/// - Carriage Return (0x0D): Often paired with newline in Windows
+/// - Form Feed (0x0C): Page break character
+/// - Vertical Tab (0x0B): Vertical spacing character
+///
+/// # How it works
+/// 1. **Parallel Comparisons**: Uses `_mm512_cmpeq_epi8_mask` to compare all 64 bytes
+///    simultaneously against each whitespace pattern vector
+/// 2. **Direct Mask Results**: AVX-512 mask instructions return bit masks directly
+///    without needing movemask operations
+/// 3. **Bitwise Combination**: Uses OR operations to combine all 6 comparison masks
+///    into a single unified whitespace mask
+///
+/// # AVX-512 advantages
+/// - Processes 64 bytes per call (vs 32 for AVX2, 16 for SSE2)
+/// - Direct mask operations are faster than vector+movemask approach
+/// - Single instruction produces bit mask for each comparison
+///
+/// # Parameters
+/// - `chunk`: 64 bytes of text data in AVX-512 register
+/// - `space_vec`, `tab_vec`, etc.: Pattern vectors for each whitespace type
+///
+/// # Returns
+/// A 64-bit mask where each bit indicates if the corresponding byte is any whitespace:
+/// - Bit = 1: This byte is a whitespace character
+/// - Bit = 0: This byte is not whitespace
+///
+/// # Example
+/// For input "Hi\tworld\n":
+/// - Input bytes: ['H','i','\t','w','o','r','l','d','\n', ...]
+/// - Individual masks: space=0, tab=0b100, cr=0, newline=0b1000000000, ff=0, vt=0
+/// - Combined mask: 0b1000000100 (bits 2 and 8 set for tab and newline)
+/// - Word counting can use this mask to detect word boundaries
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn avx512_extract_whitespace_masks(
     chunk: __m512i,
@@ -336,6 +377,48 @@ unsafe fn avx2_extract_continuation_mask(masked_chunk: __m256i, utf8_cont_patter
     _mm256_movemask_epi8(_mm256_cmpeq_epi8(masked_chunk, utf8_cont_pattern)) as u32
 }
 
+/// Extract combined whitespace mask using AVX2 instructions
+///
+/// This function detects all ASCII whitespace characters in a 32-byte chunk by comparing
+/// against all 6 whitespace types and combining the results using vector operations.
+///
+/// # ASCII Whitespace Characters Detected
+/// - Space (0x20): Most common whitespace
+/// - Tab (0x09): Horizontal tab character
+/// - Newline (0x0A): Line feed character
+/// - Carriage Return (0x0D): Often paired with newline in Windows
+/// - Form Feed (0x0C): Page break character
+/// - Vertical Tab (0x0B): Vertical spacing character
+///
+/// # How it works
+/// 1. **Parallel Comparisons**: Uses `_mm256_cmpeq_epi8` to compare all 32 bytes
+///    simultaneously against each whitespace pattern vector
+/// 2. **Vector Combination**: Uses `_mm256_or_si256` to combine comparison vectors
+///    through a tree of OR operations for efficiency
+/// 3. **Mask Extraction**: Uses `_mm256_movemask_epi8` to extract the final
+///    combined result as a 32-bit mask
+///
+/// # AVX2-specific approach
+/// - Processes 32 bytes per call (vs 64 for AVX-512, 16 for SSE2)
+/// - Uses vector operations requiring explicit combination and mask extraction
+/// - Tree-structured OR operations minimize instruction count
+/// - Compatible with Intel Haswell+ (2013) and AMD Excavator+ (2015)
+///
+/// # Parameters
+/// - `chunk`: 32 bytes of text data in AVX2 register
+/// - `space_vec`, `tab_vec`, etc.: Pattern vectors for each whitespace type
+///
+/// # Returns
+/// A 32-bit mask where each bit indicates if the corresponding byte is any whitespace:
+/// - Bit = 1: This byte is a whitespace character
+/// - Bit = 0: This byte is not whitespace
+///
+/// # Example
+/// For input "Hello\r\nworld\t":
+/// - Input bytes: ['H','e','l','l','o','\r','\n','w','o','r','l','d','\t', ...]
+/// - Individual comparisons create vectors with 0xFF for matches, 0x00 for non-matches
+/// - OR operations combine: space|tab, cr|newline, ff|vt, then combine all
+/// - Final mask: 0b1000000001100000 (bits 5,6,12 set for \r,\n,\t)
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_extract_whitespace_masks(
     chunk: __m256i,
@@ -362,6 +445,42 @@ unsafe fn avx2_extract_whitespace_masks(
 }
 
 // Helper functions for SSE2
+
+/// Extract newline byte mask using SSE2 instructions
+///
+/// This function detects newline characters ('\n', ASCII 0x0A) in a 16-byte chunk
+/// using the most widely compatible x86_64 SIMD instruction set.
+///
+/// # How it works
+/// 1. **Parallel Comparison**: Uses `_mm_cmpeq_epi8` to compare all 16 bytes
+///    simultaneously against the newline pattern vector
+/// 2. **Result Vector**: Each byte position becomes 0xFF if it matches '\n',
+///    or 0x00 if it doesn't match
+/// 3. **Mask Extraction**: Uses `_mm_movemask_epi8` to extract the high bit
+///    of each byte into a compact 16-bit mask
+///
+/// # SSE2-specific details
+/// - Processes 16 bytes per call (vs 32 for AVX2, 64 for AVX-512)
+/// - Uses 128-bit vector operations (baseline for all x86_64 CPUs)
+/// - Same vector+movemask approach as AVX2 but with smaller chunks
+/// - Maximum compatibility - available on virtually all x86_64 systems
+/// - Part of the original x86_64 specification since AMD64 introduction
+///
+/// # Parameters
+/// - `chunk`: 16 bytes of text data loaded into SSE2 register
+/// - `newline_vec`: Vector filled with '\n' characters for parallel comparison
+///
+/// # Returns
+/// A 16-bit mask where each bit indicates if the corresponding byte is a newline:
+/// - Bit = 1: This byte is '\n' (newline character)
+/// - Bit = 0: This byte is not '\n'
+///
+/// # Example
+/// For input bytes "Short\ntext\n":
+/// - Input: ['S','h','o','r','t','\n','t','e','x','t','\n', padding...]
+/// - Comparison results: [0x00,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0x00]
+/// - Extracted mask: 0b0000101000100000 = bits 5 and 10 set
+/// - Line count: 2 newlines found (mask.count_ones() = 2)
 #[target_feature(enable = "sse2")]
 unsafe fn sse2_extract_newline_mask(chunk: __m128i, newline_vec: __m128i) -> u16 {
     _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, newline_vec)) as u16
@@ -385,6 +504,49 @@ unsafe fn sse2_extract_continuation_mask(masked_chunk: __m128i, utf8_cont_patter
     _mm_movemask_epi8(_mm_cmpeq_epi8(masked_chunk, utf8_cont_pattern)) as u16
 }
 
+/// Extract combined whitespace mask using SSE2 instructions
+///
+/// This function detects all ASCII whitespace characters in a 16-byte chunk using
+/// the most compatible x86_64 SIMD instruction set available on all systems.
+///
+/// # ASCII Whitespace Characters Detected
+/// - Space (0x20): Most common whitespace
+/// - Tab (0x09): Horizontal tab character
+/// - Newline (0x0A): Line feed character
+/// - Carriage Return (0x0D): Often paired with newline in Windows
+/// - Form Feed (0x0C): Page break character
+/// - Vertical Tab (0x0B): Vertical spacing character
+///
+/// # How it works
+/// 1. **Parallel Comparisons**: Uses `_mm_cmpeq_epi8` to compare all 16 bytes
+///    simultaneously against each whitespace pattern vector
+/// 2. **Vector Combination**: Uses `_mm_or_si128` to combine comparison vectors
+///    through a tree of OR operations for efficiency
+/// 3. **Mask Extraction**: Uses `_mm_movemask_epi8` to extract the final
+///    combined result as a 16-bit mask
+///
+/// # SSE2-specific approach
+/// - Processes 16 bytes per call (smallest SIMD chunk size)
+/// - Uses 128-bit vector operations with explicit combination steps
+/// - Tree-structured OR operations minimize instruction count
+/// - Maximum compatibility - works on all x86_64 CPUs since 2003
+/// - Fallback option when newer instruction sets aren't available
+///
+/// # Parameters
+/// - `chunk`: 16 bytes of text data in SSE2 register
+/// - `space_vec`, `tab_vec`, etc.: Pattern vectors for each whitespace type
+///
+/// # Returns
+/// A 16-bit mask where each bit indicates if the corresponding byte is any whitespace:
+/// - Bit = 1: This byte is a whitespace character
+/// - Bit = 0: This byte is not whitespace
+///
+/// # Example
+/// For input "Text\n\tmore":
+/// - Input bytes: ['T','e','x','t','\n','\t','m','o','r','e', padding...]
+/// - Individual comparisons create vectors with 0xFF for matches, 0x00 for non-matches
+/// - OR operations combine: space|tab, cr|newline, ff|vt, then combine all
+/// - Final mask: 0b0000000001100000 (bits 4,5 set for \n,\t)
 #[target_feature(enable = "sse2")]
 unsafe fn sse2_extract_whitespace_masks(
     chunk: __m128i,
