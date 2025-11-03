@@ -17,15 +17,15 @@
 
 ## Performance Analysis (vs Scalar Baseline)
 
-| **Implementation** | **Speed vs Scalar** | **Availability** | **Test Environment** | **Priority** |
-|-------------------|---------------------|------------------|---------------------|--------------|
-| **Scalar (baseline)** | 1x | ✅ Universal | All platforms | ✅ Done |
-| **NEON (emulated movemask)** | ~12x | ✅ Universal | Mac M3, all ARM64 | ✅ Done |
-| **NEON (packed movemask)** | ~16x (est) | ✅ Universal | Mac M3, all ARM64 | ✅ Done |
-| **NEON + Table Lookup movemask** | ~18x (est) | ✅ Universal | Mac M3, all ARM64 | � Next |
-| **NEON + Crypto Extensions** | ~20x | ✅ Very Common | Mac M3, most ARM64 | 📋 Planned |
-| **SVE 256-bit** | ~32x | ⚠️ Cloud/Server | AWS c7g instances | 📋 Future |
-| **SVE2** | ~40-50x | ❌ Latest Cloud | AWS c8g instances | 📋 Future |
+| **Implementation**               | **Speed vs Scalar** | **Availability** | **Test Environment**| **Priority** |
+|----------------------------------|---------------------|------------------|---------------------|--------------|
+| **Scalar (baseline)**            | 1x                  | ✅ Universal     | All platforms       | ✅ Done      |
+| **NEON (emulated movemask)**     | ~12x                | ✅ Universal     | Mac M3, all ARM64   | ✅ Done      |
+| **NEON (packed movemask)**       | ~16x (est)          | ✅ Universal     | Mac M3, all ARM64   | ✅ Done      |
+| **NEON + Table Lookup movemask** | ~18x (est)          | ✅ Universal     | Mac M3, all ARM64   | � Next       |
+| **NEON + Crypto Extensions**     | ~20x                | ✅ Very Common   | Mac M3, most ARM64  | 📋 Planned   |
+| **SVE 256-bit**                  | ~32x                | ⚠️ Cloud/Server  | AWS c7g instances   | 📋 Future    |
+| **SVE2**                         | ~40-50x             | ❌ Latest Cloud  | AWS c8g instances   | 📋 Future    |
 
 ---
 
