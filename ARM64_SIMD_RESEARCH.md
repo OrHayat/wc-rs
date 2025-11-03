@@ -1,8 +1,15 @@
 # ARM64 SIMD Optimization Research
 
-## Project: wc-rs ARM64 NEON Implementation
-**Current Status**: Optimized NEON movemask implementation complete (3 variants)  
-**Goal**: Optimize text processing performance on ARM64 architectures
+**Goal**: Speed up `wc` (word count) text processing on ARM64 by parallelizing operations.
+
+**The Challenge**: Default implementation processes bytes sequentially (1 byte/cycle). ARM64 offers multiple SIMD instruction sets to process 16-128+ bytes in parallel:
+
+- **NEON** (128-bit): Universal on all ARM64. Processes 16 bytes/cycle. Available everywhere (phones, laptops, cloud).
+- **Crypto Extensions**: AES/SHA instructions for fast bit manipulation. Available on most modern ARM64 (Apple Silicon, newer phones).
+- **SVE** (Scalable Vector Ext): 128-2048 bit vectors, runtime-sized. Cloud/server only (AWS Graviton3).
+- **SVE2**: Enhanced SVE with more instructions. Latest cloud hardware only (AWS Graviton4).
+
+**NEON-Specific Problem**: Unlike x86's `_mm_movemask_epi8`, NEON has no instruction to extract comparison results as bitmasks. Need workarounds: scalar extraction (slow), horizontal adds (packed), or table lookups (vtbl).
 
 ---
 
@@ -52,7 +59,6 @@
 
 ## Implementation Architecture
 
-
 **Tasks**:
 1. ✅ Implement basic NEON (done)
 2. ✅ Implement packed movemask using horizontal adds (done)
@@ -70,16 +76,21 @@ sysctl -a | grep machdep.cpu.features  # Should show: AES, SHA1, SHA2
 ```
 
 ### **Cloud Testing (AWS Graviton)**
-**Goal**: Implement and test SVE  
-**Expected Gains**: 20x → 32x+ performance
+**Goal**: Implement and test SVE/SVE2  
+**Expected Gains**: 20x → 50x performance
 
 **Setup**:
 ```bash
+# c7g for SVE testing
 aws ec2 run-instances --image-id ami-0c2b8ca1dad447f8a --instance-type c7g.micro
 cat /proc/cpuinfo | grep sve  # Check SVE support
+
+# c8g for SVE2 testing  
+aws ec2 run-instances --instance-type c8g.micro
+cat /proc/cpuinfo | grep sve2  # Check SVE2 support
 ```
 
-**Cost**: c7g.micro $0.0168/hour (~$0.50 for testing)
+**Cost**: c7g $0.036/hr, c8g $0.038/hr (~$1 for full testing)
 
 ---
 
@@ -98,16 +109,8 @@ wc_amd64.rs
 └── count_text_scalar()                    // Fallback
 ```
 
-**Design**: Macro generates identical functions differing only in movemask. All `#[allow(dead_code)]`.
-
 ---
 
-## Research Sources
+**Next**: Implement vtbl movemask → benchmark all 3 variants → choose best one for production
 
-**ARM Docs**: ARMv8-A spec, NEON (DEN0018A), SVE (DDI 0584), Crypto (DEN0024A)  
-**Rust**: std::arch feature detection  
-**Cloud**: AWS Graviton documentation
-
----
-
-*Research document for ARM64 SIMD optimization strategies*
+*ARM64 SIMD optimization research for wc-rs text processing*
