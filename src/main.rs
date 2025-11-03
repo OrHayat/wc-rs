@@ -4,6 +4,9 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 
 mod wc_x86;
+mod wc_amd64;
+
+
 
 /// File statistics for word count operations
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -116,10 +119,17 @@ fn read_stdin() -> Result<String> {
 
 /// Count text statistics using the fastest available method (SIMD or scalar)
 fn count_text(content: &str) -> FileCounts {
-    // Try SIMD first (only available on x86_64), fallback to scalar implementation
+    // Try SIMD first based on architecture
     #[cfg(target_arch = "x86_64")]
     {
         if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes()) {
+            return simd_result;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if let Some(simd_result) = wc_amd64::count_text_simd(content.as_bytes()) {
             return simd_result;
         }
     }
