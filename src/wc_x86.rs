@@ -4,6 +4,7 @@
 //! - AVX2: 32 bytes/instruction (Intel Haswell+, AMD Excavator+)
 //! - SSE2: 16 bytes/instruction (almost all x86_64 CPUs)
 
+
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 // Import FileCounts from parent module
@@ -216,6 +217,8 @@ macro_rules! simd_count_function {
 }
 
 // Helper functions for AVX-512
+
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn avx512_extract_newline_mask(chunk: __m512i, newline_vec: __m512i) -> u64 {
     _mm512_cmpeq_epi8_mask(chunk, newline_vec)
@@ -249,6 +252,7 @@ unsafe fn avx512_extract_newline_mask(chunk: __m512i, newline_vec: __m512i) -> u
 /// - Comparison result: [false, false, true] (only 0xA9 matches 10xxxxxx pattern)
 /// - Returned mask: 0b100 (bit 2 set, indicating byte 2 is continuation)
 /// - Character count: 3 - 1 = 2 characters (correct for "Hé")
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn avx512_extract_continuation_mask(
     masked_chunk: __m512i,
@@ -298,6 +302,7 @@ unsafe fn avx512_extract_continuation_mask(
 /// - Individual masks: space=0, tab=0b100, cr=0, newline=0b1000000000, ff=0, vt=0
 /// - Combined mask: 0b1000000100 (bits 2 and 8 set for tab and newline)
 /// - Word counting can use this mask to detect word boundaries
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn avx512_extract_whitespace_masks(
     chunk: __m512i,
@@ -354,6 +359,7 @@ unsafe fn avx512_extract_whitespace_masks(
 /// - Comparison results: [0x00,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00, ...]
 /// - Extracted mask: 0b000000100000100000000000 = bits 5 and 11 set
 /// - Line count: 2 newlines found (mask.count_ones() = 2)
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_extract_newline_mask(chunk: __m256i, newline_vec: __m256i) -> u32 {
     _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, newline_vec)) as u32
@@ -371,6 +377,7 @@ unsafe fn avx2_extract_newline_mask(chunk: __m256i, newline_vec: __m256i) -> u32
 ///
 /// # Returns
 /// A 32-bit mask where each bit indicates UTF-8 continuation bytes
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_extract_continuation_mask(masked_chunk: __m256i, utf8_cont_pattern: __m256i) -> u32 {
     _mm256_movemask_epi8(_mm256_cmpeq_epi8(masked_chunk, utf8_cont_pattern)) as u32
@@ -418,6 +425,7 @@ unsafe fn avx2_extract_continuation_mask(masked_chunk: __m256i, utf8_cont_patter
 /// - Individual comparisons create vectors with 0xFF for matches, 0x00 for non-matches
 /// - OR operations combine: space|tab, cr|newline, ff|vt, then combine all
 /// - Final mask: 0b1000000001100000 (bits 5,6,12 set for \r,\n,\t)
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_extract_whitespace_masks(
     chunk: __m256i,
@@ -480,6 +488,7 @@ unsafe fn avx2_extract_whitespace_masks(
 /// - Comparison results: [0x00,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0x00]
 /// - Extracted mask: 0b0000101000100000 = bits 5 and 10 set
 /// - Line count: 2 newlines found (mask.count_ones() = 2)
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn sse2_extract_newline_mask(chunk: __m128i, newline_vec: __m128i) -> u16 {
     _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, newline_vec)) as u16
@@ -498,6 +507,7 @@ unsafe fn sse2_extract_newline_mask(chunk: __m128i, newline_vec: __m128i) -> u16
 ///
 /// # Returns
 /// A 16-bit mask where each bit indicates UTF-8 continuation bytes
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn sse2_extract_continuation_mask(masked_chunk: __m128i, utf8_cont_pattern: __m128i) -> u16 {
     _mm_movemask_epi8(_mm_cmpeq_epi8(masked_chunk, utf8_cont_pattern)) as u16
@@ -546,6 +556,7 @@ unsafe fn sse2_extract_continuation_mask(masked_chunk: __m128i, utf8_cont_patter
 /// - Individual comparisons create vectors with 0xFF for matches, 0x00 for non-matches
 /// - OR operations combine: space|tab, cr|newline, ff|vt, then combine all
 /// - Final mask: 0b0000000001100000 (bits 4,5 set for \n,\t)
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn sse2_extract_whitespace_masks(
     chunk: __m128i,
