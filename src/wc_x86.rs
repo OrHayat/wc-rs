@@ -6,7 +6,6 @@
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
-
 // Import FileCounts from parent module
 use crate::FileCounts;
 
