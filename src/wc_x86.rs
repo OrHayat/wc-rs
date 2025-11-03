@@ -222,6 +222,34 @@ unsafe fn avx512_extract_newline_mask(chunk: __m512i, newline_vec: __m512i) -> u
     _mm512_cmpeq_epi8_mask(chunk, newline_vec)
 }
 
+/// Extract UTF-8 continuation byte mask using AVX-512 instructions
+///
+/// This function detects UTF-8 continuation bytes in a 64-byte chunk to enable accurate
+/// character counting in UTF-8 text. UTF-8 is a variable-length encoding where:
+///
+/// - Single-byte characters (ASCII): 0xxxxxxx (0x00-0x7F)
+/// - Multi-byte character start bytes: 110xxxxx, 1110xxxx, 11110xxx (0xC0-0xF7)
+/// - Continuation bytes: 10xxxxxx (0x80-0xBF)
+///
+/// To count UTF-8 characters correctly, we count all bytes that are NOT continuation bytes,
+/// since each UTF-8 character starts with exactly one non-continuation byte.
+///
+/// # Parameters
+/// - `masked_chunk`: 64 bytes where each byte has been masked with 0b11000000 (top 2 bits only)
+/// - `utf8_cont_pattern`: Vector filled with 0b10000000 (the continuation byte pattern)
+///
+/// # Returns
+/// A 64-bit mask where each bit indicates if the corresponding byte is a UTF-8 continuation byte:
+/// - Bit = 1: This byte is a continuation byte (10xxxxxx pattern)
+/// - Bit = 0: This byte is NOT a continuation byte (start of a UTF-8 character)
+///
+/// # Example
+/// For the UTF-8 string "Hé" (ASCII 'H' + 2-byte 'é'):
+/// - Input bytes: [0x48, 0xC3, 0xA9] = ['H', start_of_é, continuation_of_é]
+/// - After masking: [0x00, 0xC0, 0x80] (only top 2 bits kept)
+/// - Comparison result: [false, false, true] (only 0xA9 matches 10xxxxxx pattern)
+/// - Returned mask: 0b100 (bit 2 set, indicating byte 2 is continuation)
+/// - Character count: 3 - 1 = 2 characters (correct for "Hé")
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn avx512_extract_continuation_mask(
     masked_chunk: __m512i,
@@ -251,11 +279,58 @@ unsafe fn avx512_extract_whitespace_masks(
 }
 
 // Helper functions for AVX2
+
+/// Extract newline byte mask using AVX2 instructions
+///
+/// This function detects newline characters ('\n', ASCII 0x0A) in a 32-byte chunk
+/// for efficient line counting in text processing applications.
+///
+/// # How it works
+/// 1. **Parallel Comparison**: Uses `_mm256_cmpeq_epi8` to compare all 32 bytes
+///    simultaneously against the newline pattern vector
+/// 2. **Result Vector**: Each byte position becomes 0xFF if it matches '\n',
+///    or 0x00 if it doesn't match
+/// 3. **Mask Extraction**: Uses `_mm256_movemask_epi8` to extract the high bit
+///    of each byte into a compact 32-bit mask
+///
+/// # AVX2-specific details
+/// - Processes 32 bytes per call (vs 64 for AVX-512, 16 for SSE2)
+/// - Uses vector comparison that returns a vector (not direct mask like AVX-512)
+/// - Requires mask extraction step to convert vector result to bit mask
+/// - Available on Intel Haswell+ (2013) and AMD Excavator+ (2015) CPUs
+///
+/// # Parameters
+/// - `chunk`: 32 bytes of text data loaded into AVX2 register
+/// - `newline_vec`: Vector filled with '\n' characters for parallel comparison
+///
+/// # Returns
+/// A 32-bit mask where each bit indicates if the corresponding byte is a newline:
+/// - Bit = 1: This byte is '\n' (newline character)
+/// - Bit = 0: This byte is not '\n'
+///
+/// # Example
+/// For input bytes "Hello\nWorld\nText":
+/// - Input: ['H','e','l','l','o','\n','W','o','r','l','d','\n','T','e','x','t', ...]
+/// - Comparison results: [0x00,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00, ...]
+/// - Extracted mask: 0b000000100000100000000000 = bits 5 and 11 set
+/// - Line count: 2 newlines found (mask.count_ones() = 2)
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_extract_newline_mask(chunk: __m256i, newline_vec: __m256i) -> u32 {
     _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, newline_vec)) as u32
 }
 
+/// Extract UTF-8 continuation byte mask using AVX2 instructions
+///
+/// Similar to the AVX-512 version but processes 32 bytes at a time and uses
+/// different intrinsics for mask extraction.
+///
+/// # AVX2-specific details
+/// - Processes 32 bytes per call (vs 64 for AVX-512, 16 for SSE2)
+/// - Uses `_mm256_cmpeq_epi8` for comparison (returns vector, not mask)
+/// - Uses `_mm256_movemask_epi8` to extract high bits into a 32-bit mask
+///
+/// # Returns
+/// A 32-bit mask where each bit indicates UTF-8 continuation bytes
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_extract_continuation_mask(masked_chunk: __m256i, utf8_cont_pattern: __m256i) -> u32 {
     _mm256_movemask_epi8(_mm256_cmpeq_epi8(masked_chunk, utf8_cont_pattern)) as u32
@@ -292,6 +367,19 @@ unsafe fn sse2_extract_newline_mask(chunk: __m128i, newline_vec: __m128i) -> u16
     _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, newline_vec)) as u16
 }
 
+/// Extract UTF-8 continuation byte mask using SSE2 instructions
+///
+/// The most compatible version that works on virtually all x86_64 CPUs.
+/// Uses the same UTF-8 detection logic but processes only 16 bytes at a time.
+///
+/// # SSE2-specific details
+/// - Processes 16 bytes per call (smallest chunk size)
+/// - Uses `_mm_cmpeq_epi8` for comparison (128-bit vector operations)
+/// - Uses `_mm_movemask_epi8` to extract high bits into a 16-bit mask
+/// - Available on all x86_64 CPUs (part of the baseline instruction set)
+///
+/// # Returns
+/// A 16-bit mask where each bit indicates UTF-8 continuation bytes
 #[target_feature(enable = "sse2")]
 unsafe fn sse2_extract_continuation_mask(masked_chunk: __m128i, utf8_cont_pattern: __m128i) -> u16 {
     _mm_movemask_epi8(_mm_cmpeq_epi8(masked_chunk, utf8_cont_pattern)) as u16
