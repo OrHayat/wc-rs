@@ -237,11 +237,11 @@ generate_neon_counter! {
     variant: "EMULATED"
 }
 
-generate_neon_counter! {
-    fn_name: count_text_neon_vtbl_impl,
-    movemask: neon_movemask_u8x16_vtbl,
-    variant: "VTBL"
-}
+// generate_neon_counter! {
+//     fn_name: count_text_neon_vtbl_impl,
+//     movemask: neon_movemask_u8x16_vtbl,
+//     variant: "VTBL"
+// }
 // ============================================================================
 // VTBL: NEON movemask using VTBL instruction 
 // // ============================================================================
