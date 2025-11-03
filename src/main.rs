@@ -123,10 +123,11 @@ fn count_text(content: &str) -> FileCounts {
             return simd_result;
         }
     }
-    
+
     // Fallback to scalar implementation
     count_scalar(content)
-}/// Scalar implementation for platforms without SIMD support
+}
+/// Scalar implementation for platforms without SIMD support
 fn count_scalar(content: &str) -> FileCounts {
     let mut lines = 0;
     let mut words = 0;
