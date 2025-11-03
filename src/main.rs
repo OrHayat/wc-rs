@@ -116,16 +116,17 @@ fn read_stdin() -> Result<String> {
 
 /// Count text statistics using the fastest available method (SIMD or scalar)
 fn count_text(content: &str) -> FileCounts {
-    // Try SIMD first, fallback to scalar implementation
-    if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes()) {
-        return simd_result;
+    // Try SIMD first (only available on x86_64), fallback to scalar implementation
+    #[cfg(target_arch = "x86_64")]
+    {
+        if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes()) {
+            return simd_result;
+        }
     }
-
+    
     // Fallback to scalar implementation
     count_scalar(content)
-}
-
-/// Scalar implementation for platforms without SIMD support
+}/// Scalar implementation for platforms without SIMD support
 fn count_scalar(content: &str) -> FileCounts {
     let mut lines = 0;
     let mut words = 0;

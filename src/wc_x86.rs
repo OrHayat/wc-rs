@@ -19,34 +19,32 @@ struct SimdCounts {
 }
 
 /// Try to count using SIMD - returns None if SIMD not available
+#[cfg(target_arch = "x86_64")]
 pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw") {
-            let simd_result = unsafe { count_text_avx512(content) };
-            return Some(FileCounts {
-                lines: simd_result.lines,
-                words: simd_result.words,
-                bytes: content.len(),
-                chars: simd_result.chars,
-            });
-        } else if is_x86_feature_detected!("avx2") {
-            let simd_result = unsafe { count_text_avx2(content) };
-            return Some(FileCounts {
-                lines: simd_result.lines,
-                words: simd_result.words,
-                bytes: content.len(),
-                chars: simd_result.chars,
-            });
-        } else if is_x86_feature_detected!("sse2") {
-            let simd_result = unsafe { count_text_sse2(content) };
-            return Some(FileCounts {
-                lines: simd_result.lines,
-                words: simd_result.words,
-                bytes: content.len(),
-                chars: simd_result.chars,
-            });
-        }
+    if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw") {
+        let simd_result = unsafe { count_text_avx512(content) };
+        return Some(FileCounts {
+            lines: simd_result.lines,
+            words: simd_result.words,
+            bytes: content.len(),
+            chars: simd_result.chars,
+        });
+    } else if is_x86_feature_detected!("avx2") {
+        let simd_result = unsafe { count_text_avx2(content) };
+        return Some(FileCounts {
+            lines: simd_result.lines,
+            words: simd_result.words,
+            bytes: content.len(),
+            chars: simd_result.chars,
+        });
+    } else if is_x86_feature_detected!("sse2") {
+        let simd_result = unsafe { count_text_sse2(content) };
+        return Some(FileCounts {
+            lines: simd_result.lines,
+            words: simd_result.words,
+            bytes: content.len(),
+            chars: simd_result.chars,
+        });
     }
 
     // No SIMD available
