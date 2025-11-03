@@ -243,11 +243,12 @@ if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw") {
 
 ## Next Steps
 
-1. 📋 Document ARM64 optimizations based on x86 learnings
-2. 📋 Cross-platform performance comparison
-3. 📋 Memory prefetching experiments
-4. 📋 Real-world workload benchmarking
-5. 📋 Investigate x86 micro-optimizations (VNNI, VBMI)
+1. 📋 cfg(any (target_arch = "x86" , target_arch = "x86_64"
+2. 📋 Document ARM64 optimizations based on x86 learnings
+3. 📋 Cross-platform performance comparison
+4. 📋 Memory prefetching experiments
+5. 📋 Real-world workload benchmarking
+6. 📋 Investigate x86 micro-optimizations (VNNI, VBMI)
 
 ---
 
