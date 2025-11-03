@@ -24,7 +24,7 @@ struct SimdCounts {
 /// Try to count using SIMD - returns None if SIMD not available
 #[cfg(target_arch = "aarch64")]
 pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
-    // NEON is always available on aarch64
+    // NEON should be always available on aarch64
     if std::arch::is_aarch64_feature_detected!("neon") {
         let simd_result = unsafe { count_text_neon(content) };
         return Some(FileCounts {

@@ -3,7 +3,9 @@ use clap::{ArgAction, Parser};
 use std::io::{self, Read};
 use std::path::PathBuf;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod wc_x86;
+#[cfg(target_arch = "aarch64")]
 mod wc_amd64;
 
 
@@ -120,7 +122,7 @@ fn read_stdin() -> Result<String> {
 /// Count text statistics using the fastest available method (SIMD or scalar)
 fn count_text(content: &str) -> FileCounts {
     // Try SIMD first based on architecture
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
         if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes()) {
             return simd_result;
