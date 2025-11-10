@@ -29,10 +29,59 @@ FileStats count_newlines_sve(const unsigned char *buf, size_t size) {
         svuint8_t data = svld1_u8(pg, buf + i);
 
         // compare bytes to '\n'
-        svbool_t active_newlines = svcmpeq_n_u8(pg, data, '\n');
-
+        svbool_t is_newline = svcmpeq_n_u8(pg, data, '\n');
         // // count matching lanes and add to total line count
-        stats.lines += svcntp_b8(pg, active_newlines);
+        stats.lines += svcntp_b8(pg, is_newline);
+
+        svbool_t is_space   = svcmpeq_n_u8(pg, data, ' ');
+        svbool_t is_tab     = svcmpeq_n_u8(pg, data, '\t');
+        svbool_t is_cr      = svcmpeq_n_u8(pg, data, '\r');
+        svbool_t is_ff      = svcmpeq_n_u8(pg, data, 0x0C);
+        svbool_t is_vt      = svcmpeq_n_u8(pg, data, 0x0B);
+
+        // // combine whitespace masks
+        svbool_t whitespace = svorr_b_z(pg, is_space, is_tab);
+        whitespace = svorr_b_z(pg, whitespace, is_newline);
+        whitespace = svorr_b_z(pg, whitespace, is_cr);
+        whitespace = svorr_b_z(pg, whitespace, is_ff);
+        whitespace = svorr_b_z(pg, whitespace, is_vt);
+        // --- Identify UTF-8 character starts ---
+        /*
+        1. UTF-8 byte rules
+        Single-byte ASCII: 0xxxxxxx → 1 char
+        Multibyte sequences:
+        2-byte: 110xxxxx 10xxxxxx
+        3-byte: 1110xxxx 10xxxxxx 10xxxxxx
+        4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+        Continuation bytes: 10xxxxxx → not the start of a char
+        So the first byte of each UTF-8 character is the only one you count.
+        */
+        // Continuation bytes: 0b10xxxxxx = 0x80
+        // Any byte != 0x80 in top two bits is start of UTF-8 char
+        // create a vector with 0xC0 in all lanes 
+        svuint8_t mask = svdup_n_u8(0xC0);
+
+        // AND data with mask
+        // svuint8_t masked = svand_u8_z(pg, data, mask);
+
+        svuint8_t masked = svand_u8_z(pg, data, svdup_n_u8(0xC0));
+        svbool_t char_start = svcmpne_n_u8(pg, masked, 0x80);
+        stats.chars += svcntp_b8(pg, char_start);
+
+        // // // compare masked != 0x80 to get char_start
+        // svbool_t char_start = svcmpne_n_u8(pg, masked, 0x80);
+        // // // --- Count UTF-8 chars inside words ---
+        // svbool_t char_in_word = svand_b_z(pg, char_start, svnot_b_z(pg, whitespace));
+
+        // // svbool_t char_in_word = svand_b8(pg, char_start, svnot_b8(pg, whitespace));
+        // stats.chars += svcntp_b8(pg, char_in_word);
+
+        // --- Count UTF-8 characters ---
+        // UTF-8 character = byte that is NOT a continuation byte (top bits != 10)
+        // Continuation byte pattern = 0b10xxxxxx = 0x80
+        // svbool_t char_start = svcmpne_n_u8(pg, svand_n_u8(data, 0xC0), 0x80);
+        // stats.chars += svcntp_b8(pg, char_start);
+
         // svbool_t active_spaces = svcmpeq_n_u8(pg, data, ' ');
         // svbool_t active_tabs = svcmpeq_n_u8(pg, data, '\t');
         // svbool_t active_crs = svcmpeq_n_u8(pg, data, '\r');
@@ -100,7 +149,7 @@ int main(int argc, char **argv) {
     fclose(f);
 
     FileStats stats = count_newlines_sve(buf, size);
-    printf("%zu\n", stats.lines);
+    printf("%zu %zu\n", stats.lines, stats.chars);
 
     free(buf);
     return 0;
