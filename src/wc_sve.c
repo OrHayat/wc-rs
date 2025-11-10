@@ -57,14 +57,19 @@ FileStats count_newlines_sve(const unsigned char *buf, size_t size) {
         So the first byte of each UTF-8 character is the only one you count.
         */
         // Continuation bytes: 0b10xxxxxx = 0x80
-        // Any byte != 0x80 in top two bits is start of UTF-8 char
-        // create a vector with 0xC0 in all lanes 
+        // Create a vector where every lane has 0xC0
+        // 0xC0 = 11000000b, used to extract the top 2 bits of each byte
         svuint8_t mask = svdup_n_u8(0xC0);
 
-        // AND data with mask
-        // svuint8_t masked = svand_u8_z(pg, data, mask);
-
-        svuint8_t masked = svand_u8_z(pg, data, svdup_n_u8(0xC0));
+        // AND each byte in 'data' with mask to keep only the top 2 bits
+        // For ASCII: 0x00–0x7F → top bits = 00 → masked = 0x00
+        // For continuation bytes: 10xxxxxx → masked = 0x80
+        // For first byte of multi-byte UTF-8: 11xxxxxx → masked = 0xC0, 0xE0, etc.
+        svuint8_t masked = svand_u8_z(pg, data, mask);
+        // Compare masked value != 0x80
+        // Only true for first bytes of UTF-8 characters
+        // ASCII bytes (masked = 0x00) → true
+        // Continuation bytes (masked = 0x80) → false
         svbool_t char_start = svcmpne_n_u8(pg, masked, 0x80);
         stats.chars += svcntp_b8(pg, char_start);
 
