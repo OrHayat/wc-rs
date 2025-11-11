@@ -103,7 +103,7 @@ fn count_word_transitions(
 }
 
 /// Macro to generate NEON text counting implementations with different movemask strategies
-/// 
+///
 /// Generates identical NEON functions that differ ONLY in the movemask implementation.
 /// This enables fair benchmarking of movemask strategies while keeping all other logic identical.
 macro_rules! generate_neon_counter {
@@ -135,7 +135,7 @@ macro_rules! generate_neon_counter {
             // ================================================================
             // Each vector contains the same byte value repeated across all 16 lanes
             // This allows comparing all 16 input bytes against a pattern simultaneously
-            
+
             let newline_vec = vdupq_n_u8(b'\n');      // For line counting
             let space_vec = vdupq_n_u8(b' ');         // For word detection
             let tab_vec = vdupq_n_u8(b'\t');          // For word detection
@@ -151,7 +151,7 @@ macro_rules! generate_neon_counter {
             // ================================================================
             // MAIN SIMD LOOP: Process 16 bytes at a time
             // ================================================================
-            
+
             let chunks = content.len() / CHUNK_SIZE;
             let mut i = 0;
             let mut prev_was_whitespace = true;  // Track state for word boundaries
@@ -164,7 +164,7 @@ macro_rules! generate_neon_counter {
 
                     // STEP 2: Count newlines
                     // Compare all 16 bytes against '\n', get mask, count set bits
-                    let newline_mask = unsafe { 
+                    let newline_mask = unsafe {
                         let cmp = vceqq_u8(chunk, newline_vec);
                         $movemask_fn(cmp)  // Extract bitmask from comparison result
                     };
@@ -173,7 +173,7 @@ macro_rules! generate_neon_counter {
                     // STEP 3: Count UTF-8 characters
                     // Extract top 2 bits and check for continuation byte pattern (10xxxxxx)
                     let masked_chunk = unsafe { vandq_u8(chunk, utf8_cont_mask) };
-                    let continuation_mask = unsafe { 
+                    let continuation_mask = unsafe {
                         let cmp = vceqq_u8(masked_chunk, utf8_cont_pattern);
                         $movemask_fn(cmp)  // Extract bitmask from comparison result
                     };
@@ -230,7 +230,7 @@ generate_neon_counter! {
     variant: "PACKED"
 }
 
-// Generate EMULATED version (uses scalar lane extraction) 
+// Generate EMULATED version (uses scalar lane extraction)
 generate_neon_counter! {
     fn_name: count_text_neon_emulated_impl,
     movemask: neon_movemask_u8x16_emulated,
@@ -243,7 +243,7 @@ generate_neon_counter! {
 //     variant: "VTBL"
 // }
 // ============================================================================
-// VTBL: NEON movemask using VTBL instruction 
+// VTBL: NEON movemask using VTBL instruction
 // // ============================================================================
 // #[cfg(target_arch = "aarch64")]
 // #[target_feature(enable = "neon")]
@@ -269,7 +269,7 @@ generate_neon_counter! {
 //     // Step 3: Use vtbl to select bit positions for each lane
 //     let low = vget_low_u8(shifted);
 //     let high = vget_high_u8(shifted);
-    
+
 //     let low_mask = vtbl1_u8(vreinterpret_u8_u64(table_vec), low);
 //     let high_mask = vtbl1_u8(vreinterpret_u8_u64(table_vec), high);
 
@@ -286,10 +286,10 @@ generate_neon_counter! {
 // ============================================================================
 
 /// NEON movemask using pure NEON bit packing (NEW - FAST)
-/// 
+///
 /// This implementation uses NEON bit manipulation instead of extracting individual lanes.
 /// It should be significantly faster than the emulated version below.
-/// 
+///
 /// Algorithm:
 /// 1. Extract high bits by shifting right 7 positions
 /// 2. Use horizontal adds and shifts to pack bits together
@@ -300,26 +300,26 @@ unsafe fn neon_movemask_u8x8_packed(vec: uint8x8_t) -> u8 {
     // Step 1: Extract high bits by shifting right 7 positions
     // This puts the high bit in the LSB position of each byte
     let shifted = vshr_n_u8::<7>(vec);
-    
+
     // Step 2: Create bit positions by multiplying each byte by its power of 2
     // Byte 0 * 1, Byte 1 * 2, Byte 2 * 4, Byte 3 * 8, etc.
     let bit_positions = vreinterpret_u8_u64(vdup_n_u64(0x8040201008040201u64));
-    
+
     // Step 3: Multiply shifted bits by their positions
     let positioned = vmul_u8(shifted, bit_positions);
-    
+
     // Step 4: Horizontal add to combine all bits
     // Use pairwise add repeatedly to sum all lanes
-    let sum1 = vpaddl_u8(positioned);  // 8xu8 -> 4xu16
-    let sum2 = vpaddl_u16(sum1);        // 4xu16 -> 2xu32
-    let sum3 = vpaddl_u32(sum2);        // 2xu32 -> 1xu64
-    
+    let sum1 = vpaddl_u8(positioned); // 8xu8 -> 4xu16
+    let sum2 = vpaddl_u16(sum1); // 4xu16 -> 2xu32
+    let sum3 = vpaddl_u32(sum2); // 2xu32 -> 1xu64
+
     // Extract final result
     vget_lane_u64::<0>(sum3) as u8
 }
 
 /// NEON movemask using pure NEON bit packing for 16-byte vector (NEW - FAST)
-/// 
+///
 /// Processes both halves of the 128-bit vector independently and combines results.
 /// Uses the packed 8-byte version for each half.
 #[cfg(target_arch = "aarch64")]
@@ -327,12 +327,12 @@ unsafe fn neon_movemask_u8x8_packed(vec: uint8x8_t) -> u8 {
 unsafe fn neon_movemask_u8x16_packed(vec: uint8x16_t) -> u16 {
     let low = vget_low_u8(vec);
     let high = vget_high_u8(vec);
-    
+
     // SAFETY: Both functions are marked with #[target_feature(enable = "neon")]
     // and we're already in an unsafe context with NEON enabled
     let low_mask = unsafe { neon_movemask_u8x8_packed(low) } as u16;
     let high_mask = unsafe { neon_movemask_u8x8_packed(high) } as u16;
-    
+
     low_mask | (high_mask << 8)
 }
 
@@ -341,10 +341,10 @@ unsafe fn neon_movemask_u8x16_packed(vec: uint8x16_t) -> u16 {
 // ============================================================================
 
 /// NEON movemask using scalar lane extraction for 8-byte vector (OLD - SLOW)
-/// 
+///
 /// NEON doesn't have a direct movemask instruction like x86's _mm_movemask_epi8,
 /// so this version extracts the high bit from each byte manually using lane extraction.
-/// 
+///
 /// This version uses manual lane extraction which is slow (~12x speedup vs theoretical 16x).
 /// Kept for reference and benchmarking against the packed version above.
 #[cfg(target_arch = "aarch64")]
@@ -352,22 +352,38 @@ unsafe fn neon_movemask_u8x16_packed(vec: uint8x16_t) -> u16 {
 unsafe fn neon_movemask_u8x8_emulated(vec: uint8x8_t) -> u8 {
     let mut mask = 0u8;
     // Manual unrolling for const indices
-    if (vget_lane_u8::<0>(vec) & 0x80) != 0 { mask |= 1 << 0; }
-    if (vget_lane_u8::<1>(vec) & 0x80) != 0 { mask |= 1 << 1; }
-    if (vget_lane_u8::<2>(vec) & 0x80) != 0 { mask |= 1 << 2; }
-    if (vget_lane_u8::<3>(vec) & 0x80) != 0 { mask |= 1 << 3; }
-    if (vget_lane_u8::<4>(vec) & 0x80) != 0 { mask |= 1 << 4; }
-    if (vget_lane_u8::<5>(vec) & 0x80) != 0 { mask |= 1 << 5; }
-    if (vget_lane_u8::<6>(vec) & 0x80) != 0 { mask |= 1 << 6; }
-    if (vget_lane_u8::<7>(vec) & 0x80) != 0 { mask |= 1 << 7; }
+    if (vget_lane_u8::<0>(vec) & 0x80) != 0 {
+        mask |= 1 << 0;
+    }
+    if (vget_lane_u8::<1>(vec) & 0x80) != 0 {
+        mask |= 1 << 1;
+    }
+    if (vget_lane_u8::<2>(vec) & 0x80) != 0 {
+        mask |= 1 << 2;
+    }
+    if (vget_lane_u8::<3>(vec) & 0x80) != 0 {
+        mask |= 1 << 3;
+    }
+    if (vget_lane_u8::<4>(vec) & 0x80) != 0 {
+        mask |= 1 << 4;
+    }
+    if (vget_lane_u8::<5>(vec) & 0x80) != 0 {
+        mask |= 1 << 5;
+    }
+    if (vget_lane_u8::<6>(vec) & 0x80) != 0 {
+        mask |= 1 << 6;
+    }
+    if (vget_lane_u8::<7>(vec) & 0x80) != 0 {
+        mask |= 1 << 7;
+    }
     mask
 }
 
 /// NEON movemask using scalar lane extraction for 16-byte vector (OLD - SLOW)
-/// 
+///
 /// Extracts high bits from both halves of the 128-bit vector and combines them
 /// into a 16-bit mask using manual lane extraction.
-/// 
+///
 /// This is the original emulated version kept for benchmarking comparison.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
@@ -375,38 +391,38 @@ unsafe fn neon_movemask_u8x16_emulated(vec: uint8x16_t) -> u16 {
     unsafe {
         let low = vget_low_u8(vec);
         let high = vget_high_u8(vec);
-        
+
         let low_mask = neon_movemask_u8x8_emulated(low) as u16;
         let high_mask = neon_movemask_u8x8_emulated(high) as u16;
-        
+
         low_mask | (high_mask << 8)
     }
 }
 
 /// NEON SIMD text processing: counts lines, words, and UTF-8 characters
-/// 
+///
 /// # Algorithm (16 bytes per iteration)
-/// 
+///
 /// 1. **Setup**: Create pattern vectors for parallel comparison
 ///    - Whitespace: space, tab, CR, LF, FF, VT
 ///    - UTF-8: continuation byte mask (10xxxxxx pattern)
-/// 
+///
 /// 2. **Main loop**: Process 16-byte chunks with NEON
 ///    - Load 16 bytes into NEON register
 ///    - Compare all bytes against newline → count set bits
 ///    - Mask and compare for UTF-8 continuation bytes
 ///    - Compare against all 6 whitespace types → OR results
 ///    - Count word transitions (whitespace → non-whitespace)
-/// 
+///
 /// 3. **Cleanup**: Handle remaining bytes (<16) with scalar code
-/// 
+///
 /// # Performance
-/// 
+///
 /// Currently uses **PACKED movemask** (pure NEON bit packing) for ~16x speedup.
 /// See `neon_movemask_u8x16_packed()` for implementation details.
-/// 
+///
 /// # Safety
-/// 
+///
 /// Uses unsafe NEON intrinsics. Safe to call on aarch64 (NEON always present).
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
@@ -416,11 +432,11 @@ unsafe fn count_text_neon(content: &[u8]) -> SimdCounts {
 }
 
 /// Scalar fallback implementation
-/// 
+///
 /// Used for:
 /// 1. Remaining bytes after SIMD processing (< 16 bytes)
 /// 2. Fallback when SIMD is not available
-/// 
+///
 /// This implementation correctly handles:
 /// - Line counting (newline detection)
 /// - Word counting (whitespace transitions)

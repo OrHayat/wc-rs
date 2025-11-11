@@ -3,12 +3,11 @@ use clap::{ArgAction, Parser};
 use std::io::{self, Read};
 use std::path::PathBuf;
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-mod wc_x86;
 #[cfg(target_arch = "aarch64")]
 mod wc_amd64;
-
-
+mod wc_default;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod wc_x86;
 
 /// File statistics for word count operations
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -137,34 +136,5 @@ fn count_text(content: &str) -> FileCounts {
     }
 
     // Fallback to scalar implementation
-    count_scalar(content)
-}
-/// Scalar implementation for platforms without SIMD support
-fn count_scalar(content: &str) -> FileCounts {
-    let mut lines = 0;
-    let mut words = 0;
-    let mut chars = 0;
-    let mut in_word = false;
-
-    for ch in content.chars() {
-        chars += 1;
-
-        if ch == '\n' {
-            lines += 1;
-        }
-
-        if ch.is_whitespace() {
-            in_word = false;
-        } else if !in_word {
-            words += 1;
-            in_word = true;
-        }
-    }
-
-    FileCounts {
-        lines,
-        words,
-        bytes: content.len(),
-        chars,
-    }
+    wc_default::word_count_scalar(content.as_bytes())
 }
