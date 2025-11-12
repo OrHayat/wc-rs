@@ -136,5 +136,5 @@ fn count_text(content: &str) -> FileCounts {
     }
 
     // Fallback to scalar implementation
-    wc_default::word_count_scalar(content.as_bytes())
+    wc_default::word_count_scalar(content)
 }
