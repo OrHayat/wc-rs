@@ -95,7 +95,7 @@ fn print_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&Path
         print!("{}\t", stats.lines);
     }
     if args.words {
-        print!("words{}\t", stats.words);
+        print!("{}\t", stats.words);
     }
     if args.chars {
         print!("{}\t", stats.chars);
