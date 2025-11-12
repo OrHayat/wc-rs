@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+etest = "0.3.1"

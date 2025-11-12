@@ -6,6 +6,8 @@ use std::path::PathBuf;
 #[cfg(target_arch = "aarch64")]
 mod wc_arm64;
 mod wc_default;
+#[cfg(test)]
+mod wc_default_test;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod wc_x86;
 

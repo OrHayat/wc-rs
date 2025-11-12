@@ -102,7 +102,7 @@ fn word_count_scalar_chars(content: &[u8], initial_seen_space: bool) -> ScalarRe
 /// - 2-byte: 110xxxxx 10xxxxxx
 /// - 3-byte: 1110xxxx 10xxxxxx 10xxxxxx
 /// - 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-fn detect_incomplete_utf8_suffix(data: &[u8]) -> usize {
+pub(crate) fn detect_incomplete_utf8_suffix(data: &[u8]) -> usize {
     if data.is_empty() {
         return 0;
     }
