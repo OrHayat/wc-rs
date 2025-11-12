@@ -4,7 +4,7 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 
 #[cfg(target_arch = "aarch64")]
-mod wc_amd64;
+mod wc_arm64;
 mod wc_default;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod wc_x86;
@@ -95,7 +95,7 @@ fn print_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&Path
         print!("{}\t", stats.lines);
     }
     if args.words {
-        print!("{}\t", stats.words);
+        print!("words{}\t", stats.words);
     }
     if args.chars {
         print!("{}\t", stats.chars);
@@ -130,7 +130,7 @@ fn count_text(content: &str) -> FileCounts {
 
     #[cfg(target_arch = "aarch64")]
     {
-        if let Some(simd_result) = wc_amd64::count_text_simd(content.as_bytes()) {
+        if let Some(simd_result) = wc_arm64::count_text_simd(content.as_bytes()) {
             return simd_result;
         }
     }

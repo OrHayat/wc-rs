@@ -1,5 +1,3 @@
-use std::ops::BitAnd;
-
 use crate::FileCounts;
 
 pub fn word_count_scalar(content: &[u8]) -> FileCounts {

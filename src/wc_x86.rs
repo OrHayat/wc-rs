@@ -7,7 +7,7 @@
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use std::arch::x86_64::*;
 
-// Import FileCounts from parent module
+use crate::wc_default;
 use crate::FileCounts;
 
 /// Internal SIMD results
@@ -59,7 +59,6 @@ fn count_text_sse2(content: &[u8]) -> SimdCounts {
     }
     let buf = chunks.remainder();
     if !buf.is_empty() {
-        use crate::wc_default;
         let buf_count = wc_default::word_count_scalar(buf);
         res.chars += buf_count.chars;
         res.lines += buf_count.lines;
