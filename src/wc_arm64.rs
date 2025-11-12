@@ -3,7 +3,7 @@
 
 #[cfg(target_arch = "aarch64")]
 use  std::arch::aarch64::*;
-use crate::FileCounts;
+use crate::{FileCounts, LocaleEncoding};
 use crate::wc_default;
 
 
@@ -11,10 +11,10 @@ use crate::wc_default;
 ///
 /// Returns `Some(FileCounts)` if NEON instructions are available, `None` otherwise.
 #[cfg(target_arch = "aarch64")]
-pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
+pub fn count_text_simd(content: &[u8], locale: LocaleEncoding) -> Option<FileCounts> {
     if std::arch::is_aarch64_feature_detected!("neon") {
         return  Some(unsafe {
-            count_text_neon(content)
+            count_text_neon(content, locale)
         })
     }
     None
@@ -22,9 +22,9 @@ pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
 
 /// Counts lines, words, and UTF-8 characters using ARM NEON SIMD instructions.
 ///
-/// Processes input in 16-byte chunks. 
+/// Processes input in 16-byte chunks.
 /// Falls back to scalar counting for remaining bytes.
-unsafe fn count_text_neon(content: &[u8]) -> FileCounts {
+unsafe fn count_text_neon(content: &[u8], locale: LocaleEncoding) -> FileCounts {
     unsafe{
     let mut res=FileCounts{
         lines:0,
@@ -46,37 +46,64 @@ unsafe fn count_text_neon(content: &[u8]) -> FileCounts {
     let cont_mask = vdupq_n_u8(0b11000000); // Mask to check top 2 bits
     let cont_pattern = vdupq_n_u8(0b10000000); // UTF-8 continuation bytes: 0b10xxxxxx
 
+    // Carry buffer for incomplete UTF-8 sequences at chunk boundaries
+    let mut carry: Vec<u8> = Vec::with_capacity(3);
+
     for chunk in chunks.by_ref(){
        let chunk_vec: uint8x16_t = vld1q_u8(chunk.as_ptr());
 
-       // Check if chunk contains non-ASCII bytes (>= 0x80) for Unicode whitespace
+       // Check if chunk OR carry contains non-ASCII bytes
        let ascii_threshold = vdupq_n_u8(0x80);
        let has_non_ascii = vcgeq_u8(chunk_vec, ascii_threshold);
        let non_ascii_count = vaddvq_u8(vandq_u8(has_non_ascii, ones)) as usize;
+       let has_carry = !carry.is_empty();
 
-       if non_ascii_count > 0 {
-           // Chunk has UTF-8 multi-byte sequences: use scalar for correct Unicode handling
-           let chunk_count = wc_default::word_count_scalar_with_state(chunk, seen_space);
-           res.lines += chunk_count.lines;
-           res.chars += chunk_count.chars;
-           res.words += chunk_count.words;
+       if (non_ascii_count > 0 || has_carry) && locale == LocaleEncoding::Utf8 {
+           // UTF-8 locale with multi-byte sequences: use scalar for Unicode whitespace handling
+           // Combine carry with current chunk
+           let mut combined: Vec<u8> = Vec::with_capacity(carry.len() + chunk.len());
+           combined.extend_from_slice(&carry);
+           combined.extend_from_slice(chunk);
 
-           // Update seen_space: check if last byte was whitespace
-           // Safe: chunk is exactly CHUNK_SIZE (16 bytes) from chunks_exact
-           seen_space = wc_default::is_whitespace_byte(chunk[15] as char);
+           let scalar_result = wc_default::word_count_scalar_with_state(&combined, seen_space, locale);
+
+           res.lines += scalar_result.counts.lines;
+           res.chars += scalar_result.counts.chars;
+           res.words += scalar_result.counts.words;
+
+           seen_space = scalar_result.seen_space;
+
+           // Save incomplete bytes for next chunk
+           if scalar_result.incomplete_bytes > 0 {
+               let start = combined.len() - scalar_result.incomplete_bytes;
+               carry.clear();
+               carry.extend_from_slice(&combined[start..]);
+           } else {
+               carry.clear();
+           }
        } else {
-           // Pure ASCII chunk: use fast SIMD path
+           // C locale (any bytes) OR pure ASCII: use fast SIMD path
+           // In C locale, non-ASCII bytes are just non-whitespace bytes
            // Count newlines
            let newline_cmp: uint8x16_t = vceqq_u8(chunk_vec, newline_vec);
            let mask = vandq_u8(newline_cmp, ones);
            res.lines += vaddvq_u8(mask) as usize;
 
-           // Count characters (UTF-8 aware - skip continuation bytes 0b10xxxxxx)
-           let masked = vandq_u8(chunk_vec, cont_mask);
-           let is_continuation = vceqq_u8(masked, cont_pattern);
-           let is_not_continuation = vmvnq_u8(is_continuation);
-           let mask = vandq_u8(is_not_continuation, ones);
-           res.chars += vaddvq_u8(mask) as usize;
+           // Count characters based on locale
+           match locale {
+               LocaleEncoding::C => {
+                   // C locale: every byte is a character
+                   res.chars += CHUNK_SIZE;
+               }
+               LocaleEncoding::Utf8 => {
+                   // UTF-8 locale: skip continuation bytes (0b10xxxxxx)
+                   let masked = vandq_u8(chunk_vec, cont_mask);
+                   let is_continuation = vceqq_u8(masked, cont_pattern);
+                   let is_not_continuation = vmvnq_u8(is_continuation);
+                   let mask = vandq_u8(is_not_continuation, ones);
+                   res.chars += vaddvq_u8(mask) as usize;
+               }
+           }
 
            // Count words - ASCII whitespace only
            let in_range = vandq_u8(
@@ -102,15 +129,25 @@ unsafe fn count_text_neon(content: &[u8]) -> FileCounts {
            let mut last_bytes = [0u8; 16];
            vst1q_u8(last_bytes.as_mut_ptr(), is_not_ws);
            seen_space = last_bytes[15] == 0x00;
+
+           // C locale doesn't need carry buffer
+           carry.clear();
        }
     }
+
+    // Process remainder with any carry bytes
     let buf = chunks.remainder();
-    if !buf.is_empty() {
-        let buf_count = wc_default::word_count_scalar_with_state(buf, seen_space);
-        res.chars += buf_count.chars;
-        res.lines += buf_count.lines;
-        res.words += buf_count.words;
-    };
+    let mut final_buf: Vec<u8> = Vec::with_capacity(carry.len() + buf.len());
+    final_buf.extend_from_slice(&carry);
+    final_buf.extend_from_slice(buf);
+
+    if !final_buf.is_empty() {
+        let buf_result = wc_default::word_count_scalar_with_state(&final_buf, seen_space, locale);
+        res.chars += buf_result.counts.chars;
+        res.lines += buf_result.counts.lines;
+        res.words += buf_result.counts.words;
+        // Note: incomplete_bytes at very end are ignored (partial character at EOF)
+    }
 
     res
 }

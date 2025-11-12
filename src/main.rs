@@ -18,6 +18,30 @@ pub struct FileCounts {
     pub chars: usize,
 }
 
+/// Locale encoding type for character handling
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LocaleEncoding {
+    /// C/POSIX locale - byte-based, ASCII whitespace only
+    C,
+    /// UTF-8 locale - Unicode aware, multi-byte characters
+    Utf8,
+}
+
+/// Detect locale encoding from environment variables (LC_ALL, LC_CTYPE, LANG)
+fn detect_locale() -> LocaleEncoding {
+    let locale = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LC_CTYPE"))
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default();
+
+    if locale == "C" || locale == "POSIX" {
+        LocaleEncoding::C
+    } else {
+        // Default to UTF-8 for all other locales
+        LocaleEncoding::Utf8
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     version,
@@ -64,27 +88,30 @@ fn run() -> Result<()> {
         args.bytes = true;
     }
 
+    // Detect locale once at startup
+    let locale = detect_locale();
+
     if args.files.is_empty() {
-        process_stdin(&args)?;
+        process_stdin(&args, locale)?;
     } else {
-        process_files(&args)?;
+        process_files(&args, locale)?;
     }
 
     Ok(())
 }
 
-fn process_stdin(args: &WordCountArgs) -> Result<()> {
+fn process_stdin(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
     let content = read_stdin()?;
-    let stats = count_text(&content);
+    let stats = count_text(&content, locale);
     print_stats(&stats, args, None);
     Ok(())
 }
 
-fn process_files(args: &WordCountArgs) -> Result<()> {
+fn process_files(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
     for file_path in &args.files {
         let content = std::fs::read_to_string(file_path)
             .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
-        let stats = count_text(&content);
+        let stats = count_text(&content, locale);
         print_stats(&stats, args, Some(file_path));
     }
     Ok(())
@@ -119,22 +146,22 @@ fn read_stdin() -> Result<String> {
 }
 
 /// Count text statistics using the fastest available method (SIMD or scalar)
-fn count_text(content: &str) -> FileCounts {
+fn count_text(content: &str, locale: LocaleEncoding) -> FileCounts {
     // Try SIMD first based on architecture
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes()) {
+        if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes(), locale) {
             return simd_result;
         }
     }
 
     #[cfg(target_arch = "aarch64")]
     {
-        if let Some(simd_result) = wc_arm64::count_text_simd(content.as_bytes()) {
+        if let Some(simd_result) = wc_arm64::count_text_simd(content.as_bytes(), locale) {
             return simd_result;
         }
     }
 
     // Fallback to scalar implementation
-    wc_default::word_count_scalar(content)
+    wc_default::word_count_scalar(content, locale)
 }
