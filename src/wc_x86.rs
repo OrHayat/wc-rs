@@ -136,9 +136,105 @@ fn process_scalar_with_carry(
     result.seen_space
 }
 
+// ============================================================================
+// SIMD Function Generator Macro
+// ============================================================================
+
+/// Generates a SIMD text counting function with the specified parameters
+///
+/// This macro generates the main counting function structure (initialization,
+/// loop, remainder processing) while taking helper function names as parameters.
+/// This allows each SIMD variant (SSE2/AVX2/AVX512) to have completely different
+/// implementations for the helper functions.
+macro_rules! define_simd_text_counter {
+    (
+        fn_name: $fn_name:ident,
+        vec_type: $vec_type:ty,
+        chunk_size: $chunk_size:expr,
+        mask_type: $mask_type:ty,
+        target_feature: $target_feature:expr,
+        load_fn: $load_fn:ident,
+        count_newlines_fn: $count_newlines_fn:ident,
+        has_non_ascii_fn: $has_non_ascii_fn:ident,
+        count_utf8_chars_fn: $count_utf8_chars_fn:ident,
+        detect_whitespace_fn: $detect_whitespace_fn:ident,
+    ) => {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[target_feature(enable = $target_feature)]
+        unsafe fn $fn_name(content: &[u8], locale: LocaleEncoding) -> FileCounts {
+            const CHUNK_SIZE: usize = $chunk_size;
+            let mut result_acc = FileCounts {
+                lines: 0,
+                words: 0,
+                chars: 0,
+                bytes: content.len(),
+            };
+            let mut chunks = content.chunks_exact(CHUNK_SIZE);
+
+            // Word counting state: tracks if previous byte was whitespace
+            let mut seen_space = true;
+
+            // UTF-8 carry buffer: incomplete multi-byte sequences at chunk boundaries
+            let mut carry: Vec<u8> = Vec::with_capacity(3);
+
+            for chunk in chunks.by_ref() {
+                let chunk_vec: $vec_type = unsafe { $load_fn(chunk.as_ptr() as *const $vec_type) };
+
+                let has_non_ascii = unsafe { $has_non_ascii_fn(chunk_vec) };
+                let has_carry = !carry.is_empty();
+
+                // Choose processing path based on content and locale
+                // Scalar path: UTF-8 locale with non-ASCII or incomplete sequences
+                // SIMD path: C locale (any bytes) OR pure ASCII UTF-8
+                if (has_non_ascii || has_carry) && locale == LocaleEncoding::Utf8 {
+                    seen_space = process_scalar_with_carry(
+                        chunk,
+                        &mut carry,
+                        &mut result_acc,
+                        seen_space,
+                        locale,
+                    );
+                } else {
+                    // Fast SIMD path: C locale or pure ASCII
+                    result_acc.lines += unsafe { $count_newlines_fn(chunk_vec) };
+
+                    result_acc.chars += match locale {
+                        LocaleEncoding::C => CHUNK_SIZE,
+                        LocaleEncoding::Utf8 => unsafe { $count_utf8_chars_fn(chunk_vec) },
+                    };
+
+                    let ws_mask: $mask_type = unsafe { $detect_whitespace_fn(chunk_vec) };
+                    let (word_count, last_is_ws) = count_word_starts_from_mask(ws_mask, seen_space);
+                    result_acc.words += word_count;
+                    seen_space = last_is_ws;
+
+                    carry.clear();
+                }
+            }
+
+            // Process remainder
+            let remainder = chunks.remainder();
+            if !remainder.is_empty() || !carry.is_empty() {
+                process_scalar_with_carry(
+                    remainder,
+                    &mut carry,
+                    &mut result_acc,
+                    seen_space,
+                    locale,
+                );
+            }
+
+            result_acc
+        }
+    };
+}
+
+/// Manual SSE2 implementation - kept for reference/documentation
+/// This shows what the macro generates
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
-unsafe fn count_text_sse2(content: &[u8], locale: LocaleEncoding) -> FileCounts {
+#[allow(dead_code)]
+unsafe fn count_text_sse2_manual(content: &[u8], locale: LocaleEncoding) -> FileCounts {
     const CHUNK_SIZE: usize = 16;
     let mut result_acc = FileCounts {
         lines: 0,
@@ -192,3 +288,21 @@ unsafe fn count_text_sse2(content: &[u8], locale: LocaleEncoding) -> FileCounts 
 
     result_acc
 }
+
+// ============================================================================
+// Generate SIMD Implementations
+// ============================================================================
+
+// Generate SSE2 implementation using the macro
+define_simd_text_counter!(
+    fn_name: count_text_sse2,
+    vec_type: __m128i,
+    chunk_size: 16,
+    mask_type: u16,
+    target_feature: "sse2",
+    load_fn: _mm_loadu_si128,
+    count_newlines_fn: sse2_count_newlines,
+    has_non_ascii_fn: sse2_has_non_ascii,
+    count_utf8_chars_fn: sse2_count_utf8_chars,
+    detect_whitespace_fn: sse2_detect_whitespace,
+);
