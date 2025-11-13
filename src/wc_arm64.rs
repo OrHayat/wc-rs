@@ -5,14 +5,68 @@ use std::arch::aarch64::*;
 use crate::{FileCounts, LocaleEncoding};
 use crate::wc_default;
 
+// ============================================================================
+// SVE FFI Declarations (C implementation)
+// ============================================================================
+
+mod sve_ffi {
+    use crate::FileCounts;
+
+    // Match C's FileCountsResult struct
+    #[repr(C)]
+    pub struct FileCountsResult {
+        pub counts: FileCounts,
+        pub success: bool,
+    }
+
+    unsafe extern "C" {
+        // Checked version: safe, verifies CPU supports SVE
+        #[allow(dead_code)]
+        pub fn count_text_sve_c_checked(
+            content: *const u8,
+            len: usize,
+            locale: u8,
+        ) -> FileCountsResult;
+
+        // Unchecked version: assumes SVE is available
+        pub fn count_text_sve_c_unchecked(
+            content: *const u8,
+            len: usize,
+            locale: u8,
+        ) -> FileCounts;
+    }
+}
+
+pub(crate) unsafe fn count_text_sve(content: &[u8], locale: LocaleEncoding) -> FileCounts {
+    let locale_byte = match locale {
+        LocaleEncoding::C => 0,
+        LocaleEncoding::Utf8 => 1,
+    };
+    unsafe{
+        sve_ffi::count_text_sve_c_unchecked(content.as_ptr(), content.len(), locale_byte)
+    }
+}
+
 /// Attempts SIMD-accelerated text counting on ARM64 processors.
 ///
-/// Returns `Some(FileCounts)` if NEON instructions are available, `None` otherwise.
+/// Returns `Some(FileCounts)` if NEON or SVE instructions are available, `None` otherwise.
 #[cfg(target_arch = "aarch64")]
 pub fn count_text_simd(content: &[u8], locale: LocaleEncoding) -> Option<FileCounts> {
+    println!("Detecting ARM64 SIMD features...");
+    // Try SVE first (most powerful, 128-2048 bit vectors)
+    if std::arch::is_aarch64_feature_detected!("sve") {
+        println!("Detecting support sve........");
+
+        return Some(unsafe { count_text_sve(content, locale) });
+    }
+
+    // Fall back to NEON (baseline ARM64, 128-bit vectors)
     if std::arch::is_aarch64_feature_detected!("neon") {
+        println!("Detecting support neon........");
+    
         return Some(unsafe { count_text_neon(content, locale) });
     }
+
     None
 }
 

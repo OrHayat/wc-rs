@@ -16,6 +16,7 @@ mod wc_x86;
 mod wc_x86_test;
 
 /// File statistics for word count operations
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FileCounts {
     pub lines: usize,

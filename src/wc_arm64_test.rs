@@ -21,11 +21,19 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    // NEON-specific test cases can be added here
-    // These test edge cases specific to SIMD implementation
+    // SVE-specific test - only runs if SVE is available
+    #[apply(common_word_count_cases)]
+    fn test_word_count_sve(input: &str, locale: LocaleEncoding, expected: FileCounts) {
+        // Runtime check for SVE support
+        if !std::arch::is_aarch64_feature_detected!("sve") {
+            // Rust doesn't have built-in test skip - early return is idiomatic
+            // Print for visibility during test runs
+            eprintln!("SKIP: SVE not available on this CPU");
+            return;
+        }
 
-    // TODO: Add NEON-specific edge cases:
-    // - Chunk boundary cases (16-byte boundaries)
-    // - Very long strings (stress test SIMD loop)
-    // - Strings that trigger scalar fallback paths
+        // Test SVE implementation directly (not NEON fallback)
+        let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), locale) };
+        assert_eq!(result, expected);
+    }
 }
