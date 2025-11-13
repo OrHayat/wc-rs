@@ -180,6 +180,133 @@ pub mod tests {
         LocaleEncoding::Utf8,
         counts(0, 2, 20, 23)
     )]
+    // ====== ADDITIONAL EDGE CASES ======
+    // Mixed line endings
+    // Note: Only \n counts as newline, \r is just a character (but still whitespace for word splitting)
+    #[case::windows_line_ending("hello\r\nworld", LocaleEncoding::Utf8, counts(1, 2, 12, 12))]
+    #[case::old_mac_line_ending("hello\rworld", LocaleEncoding::Utf8, counts(0, 2, 11, 11))]
+    #[case::mixed_line_endings("line1\nline2\r\nline3\r", LocaleEncoding::Utf8, counts(2, 3, 19, 19))]
+    #[case::multiple_crlf("a\r\nb\r\nc\r\n", LocaleEncoding::Utf8, counts(3, 3, 9, 9))]
+    // Empty lines and consecutive newlines
+    #[case::two_consecutive_newlines("\n\n", LocaleEncoding::Utf8, counts(2, 0, 2, 2))]
+    #[case::word_empty_line_word("word1\n\nword2", LocaleEncoding::Utf8, counts(2, 2, 12, 12))]
+    #[case::multiple_empty_lines("a\n\n\n\nb", LocaleEncoding::Utf8, counts(4, 2, 6, 6))]
+    #[case::empty_line_with_spaces("word\n  \nword", LocaleEncoding::Utf8, counts(2, 2, 12, 12))]
+    // Control characters (beyond basic whitespace)
+    #[case::null_byte("hello\x00world", LocaleEncoding::Utf8, counts(0, 1, 11, 11))] // NULL is not whitespace
+    #[case::bell_char("hello\x07world", LocaleEncoding::Utf8, counts(0, 1, 11, 11))] // BEL is not whitespace
+    #[case::escape_char("hello\x1bworld", LocaleEncoding::Utf8, counts(0, 1, 11, 11))] // ESC is not whitespace
+    // Very long words (stress SIMD boundaries)
+    #[case::long_word_32_bytes(
+        "abcdefghijklmnopqrstuvwxyz123456", // 32 bytes, 1 word
+        LocaleEncoding::Utf8,
+        counts(0, 1, 32, 32)
+    )]
+    #[case::long_word_64_bytes(
+        "abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmnopqrstuvwxyz12", // 64 bytes
+        LocaleEncoding::Utf8,
+        counts(0, 1, 64, 64)
+    )]
+    #[case::long_word_with_space_after(
+        "abcdefghijklmnopqrstuvwxyz123456 next",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 37, 37)
+    )]
+    // Exact boundary alignments (16, 32, 48 bytes)
+    #[case::exactly_16_bytes("1234567890123456", LocaleEncoding::Utf8, counts(0, 1, 16, 16))]
+    #[case::exactly_32_bytes(
+        "12345678901234567890123456789012",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 32, 32)
+    )]
+    #[case::exactly_48_bytes(
+        "123456789012345678901234567890123456789012345678",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 48, 48)
+    )]
+    #[case::word_at_16_boundary("123456789012345 word", LocaleEncoding::Utf8, counts(0, 2, 20, 20))]
+    #[case::word_at_32_boundary(
+        "1234567890123456789012345678901 word",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 36, 36)
+    )]
+    // Zero-width and special Unicode characters
+    // IMPORTANT: Zero-width chars (U+200B, U+200C, U+200D, U+2060) are Unicode category Cf (Format)
+    // They are NOT whitespace per char.is_whitespace(), so they DON'T split words!
+    // U+200B = E2 80 8B (3 bytes), U+200D = E2 80 8D (3 bytes), etc.
+    #[case::zero_width_space("hello\u{200B}world", LocaleEncoding::Utf8, counts(0, 1, 11, 13))] // U+200B (NOT whitespace!)
+    #[case::zero_width_joiner("hello\u{200D}world", LocaleEncoding::Utf8, counts(0, 1, 11, 13))] // U+200D (not whitespace)
+    #[case::zero_width_non_joiner("hello\u{200C}world", LocaleEncoding::Utf8, counts(0, 1, 11, 13))] // U+200C (not whitespace)
+    #[case::byte_order_mark("\u{FEFF}hello", LocaleEncoding::Utf8, counts(0, 1, 6, 8))] // BOM U+FEFF = EF BB BF (3 bytes)
+    #[case::word_joiner("hello\u{2060}world", LocaleEncoding::Utf8, counts(0, 1, 11, 13))] // U+2060 = E2 81 A0 (3 bytes, not whitespace)
+    // Combining characters and diacritics
+    #[case::combining_acute("e\u{0301}", LocaleEncoding::Utf8, counts(0, 1, 2, 3))] // e + combining acute = é
+    #[case::word_with_combining("cafe\u{0301}", LocaleEncoding::Utf8, counts(0, 1, 5, 6))] // café
+    #[case::multiple_combining(
+        "e\u{0301}\u{0302}",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 3, 5)
+    )] // e with multiple accents
+    // More Unicode whitespace variations
+    #[case::thin_space("hello\u{2009}world", LocaleEncoding::Utf8, counts(0, 2, 11, 13))] // U+2009 thin space
+    #[case::hair_space("hello\u{200A}world", LocaleEncoding::Utf8, counts(0, 2, 11, 13))] // U+200A hair space
+    #[case::line_separator("hello\u{2028}world", LocaleEncoding::Utf8, counts(0, 2, 11, 13))] // U+2028 line separator
+    #[case::paragraph_separator("hello\u{2029}world", LocaleEncoding::Utf8, counts(0, 2, 11, 13))] // U+2029 paragraph separator
+    #[case::figure_space("hello\u{2007}world", LocaleEncoding::Utf8, counts(0, 2, 11, 13))] // U+2007 figure space
+    #[case::ideographic_space("hello\u{3000}world", LocaleEncoding::Utf8, counts(0, 2, 11, 13))] // U+3000 ideographic space
+    // Emoji variations and sequences
+    #[case::emoji_skin_tone("👍🏽", LocaleEncoding::Utf8, counts(0, 1, 2, 8))] // Thumbs up + skin tone modifier
+    // IMPORTANT: ZWJ emoji sequences count each scalar value separately!
+    // Family emoji: 👨 + ZWJ + 👩 + ZWJ + 👧 + ZWJ + 👦 = 7 chars (not 1!)
+    // Each emoji is 4 bytes, each ZWJ (U+200D) is 3 bytes: 4+3+4+3+4+3+4 = 25 bytes
+    #[case::emoji_with_space("👨‍👩‍👧‍👦 family", LocaleEncoding::Utf8, counts(0, 2, 14, 32))] // 7 (emoji) + 1 (space) + 6 (family) = 14 chars
+    #[case::multiple_emojis("😀😃😄", LocaleEncoding::Utf8, counts(0, 1, 3, 12))] // 3 emojis = 1 word
+    #[case::emoji_separated("😀 😃 😄", LocaleEncoding::Utf8, counts(0, 3, 5, 14))] // 3 words
+    // Maximum Unicode codepoint
+    #[case::max_unicode("\u{10FFFF}", LocaleEncoding::Utf8, counts(0, 1, 1, 4))] // U+10FFFF (max valid)
+    #[case::supplementary_plane("𐍈𐍈𐍈", LocaleEncoding::Utf8, counts(0, 1, 3, 12))] // Gothic letters (U+10348)
+    // Alternating single and multi-byte patterns
+    #[case::alternating_1_2_byte("aéaéaé", LocaleEncoding::Utf8, counts(0, 1, 6, 9))]
+    #[case::alternating_1_3_byte("a✓a✓a✓", LocaleEncoding::Utf8, counts(0, 1, 6, 12))]
+    #[case::alternating_1_4_byte("a💯a💯", LocaleEncoding::Utf8, counts(0, 1, 4, 10))] // a(1+1) + 💯(1+4) + a(1+1) + 💯(1+4) = 4 chars, 10 bytes
+    #[case::alternating_with_spaces("a é ✓ 💯", LocaleEncoding::Utf8, counts(0, 4, 7, 13))]
+    // Right-to-left text (Arabic, Hebrew)
+    #[case::arabic_text("مرحبا العالم", LocaleEncoding::Utf8, counts(0, 2, 12, 23))] // "Hello World" in Arabic
+    #[case::hebrew_text("שלום עולם", LocaleEncoding::Utf8, counts(0, 2, 9, 17))] // "Hello World" in Hebrew: 4 + space + 4 = 9 chars
+    #[case::mixed_ltr_rtl("hello مرحبا world", LocaleEncoding::Utf8, counts(0, 3, 17, 22))]
+    // Pathological whitespace sequences
+    #[case::many_space_types(
+        "word1 \t\n\r\u{00A0}\u{2003}\u{3000}word2",
+        LocaleEncoding::Utf8,
+        counts(1, 2, 17, 22)
+    )]
+    #[case::whitespace_soup(
+        "\t \n \r \u{00A0} \u{2009} \u{200A}",
+        LocaleEncoding::Utf8,
+        counts(1, 0, 11, 16)
+    )]
+    // Words with punctuation (punctuation is not whitespace)
+    #[case::word_with_comma("hello,world", LocaleEncoding::Utf8, counts(0, 1, 11, 11))]
+    #[case::word_with_period("hello.world", LocaleEncoding::Utf8, counts(0, 1, 11, 11))]
+    #[case::sentence("Hello, world!", LocaleEncoding::Utf8, counts(0, 2, 13, 13))]
+    #[case::quoted_word("\"hello\"", LocaleEncoding::Utf8, counts(0, 1, 7, 7))]
+    // Note: Invalid UTF-8 sequences tested separately in detect_incomplete_utf8_suffix tests
+    // String literals must be valid UTF-8, but invalid sequences are handled at byte level
+    // C locale specific edge cases
+    #[case::c_locale_with_newline("hello\nworld", LocaleEncoding::C, counts(1, 2, 11, 11))] // Test newline counting in C locale
+    #[case::c_locale_multiple_newlines("a\nb\nc\n", LocaleEncoding::C, counts(3, 3, 6, 6))] // Multiple newlines in C locale
+    #[case::c_locale_multibyte_as_bytes("café\u{2003}test", LocaleEncoding::C, counts(0, 1, 12, 12))] // café(5) + em-space(3) + test(4) = 12 bytes = 12 chars in C
+    #[case::c_locale_emoji_as_bytes("💯test", LocaleEncoding::C, counts(0, 1, 8, 8))] // 4 emoji bytes + 4 ASCII
+    #[case::c_locale_only_ascii_whitespace(
+        "word1\u{00A0}word2",
+        LocaleEncoding::C,
+        counts(0, 1, 12, 12)
+    )] // nbsp not recognized
+    // Extreme cases
+    #[case::only_replacement_chars("\u{FFFD}\u{FFFD}\u{FFFD}", LocaleEncoding::Utf8, counts(0, 1, 3, 9))]
+    // Zero-width spaces are NOT whitespace, so they form a word (not empty!)
+    #[case::only_zero_width_spaces("\u{200B}\u{200B}\u{200B}", LocaleEncoding::Utf8, counts(0, 1, 3, 9))]
+    #[case::word_ending_at_exact_16("12345678901234 w", LocaleEncoding::Utf8, counts(0, 2, 16, 16))]
     pub fn common_word_count_cases(
         #[case] input: &str,
         #[case] locale: LocaleEncoding,

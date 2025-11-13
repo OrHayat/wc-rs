@@ -7,11 +7,33 @@ fn main() {
         if can_compile_sve() {
             println!("cargo:rerun-if-changed=src/wc_arm64_sve.c");
 
-            cc::Build::new()
+            let mut build = cc::Build::new();
+            build
                 .file("src/wc_arm64_sve.c")
-                .flag("-march=armv8.2-a+sve")  // Enable SVE instructions
-                .flag("-O3")                    // Optimize for performance
-                .compile("wc_arm64_sve");
+                .flag("-march=armv8.2-a+sve");  // Enable SVE instructions
+
+            // Add coverage flags when building with cargo llvm-cov
+            // Check for CARGO_LLVM_COV or RUSTFLAGS containing coverage flags
+            let coverage_enabled = std::env::var("CARGO_LLVM_COV").is_ok()
+                || std::env::var("RUSTFLAGS").unwrap_or_default().contains("instrument-coverage")
+                || std::env::var("RUSTFLAGS").unwrap_or_default().contains("profile-generate");
+
+            if coverage_enabled {
+                println!("cargo:warning=Building C code with coverage instrumentation");
+                // Use GCC-style coverage flags (works with gcc)
+                build.flag("--coverage");  // Shorthand for -fprofile-arcs -ftest-coverage
+            } else {
+                build.flag("-O3");  // Optimize for performance (only when not doing coverage)
+            }
+
+            build.compile("wc_arm64_sve");
+
+            // Link with gcov when coverage is enabled
+            if coverage_enabled {
+                // Add gcc library path and link with gcov
+                println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
+                println!("cargo:rustc-link-lib=static=gcov");
+            }
 
             println!("cargo:warning=SVE headers available - compiling SVE C code");
 

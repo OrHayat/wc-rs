@@ -31,7 +31,6 @@ mod tests {
             return;
         }
 
-        // Test SVE implementation directly (not NEON fallback)
         let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), locale) };
         assert_eq!(result, expected);
     }
