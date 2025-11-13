@@ -226,64 +226,39 @@ unsafe fn avx512_detect_whitespace(chunk: __m512i) -> u64 {
     (in_range | is_space) as u64
 }
 
-/// Count word starts from whitespace mask (16-bit for SSE2)
+// ============================================================================
+// Word Counting Helper - Macro Generator
+// ============================================================================
+
+/// Macro to generate word counting functions for different mask types
 /// A word start is: not_ws[i] && prev_was_ws[i-1]
-#[inline]
-fn count_word_starts_from_mask(ws_mask: u16, seen_space_before: bool) -> (usize, bool) {
-    let not_ws = !ws_mask;
+macro_rules! count_word_starts_impl {
+    ($fn_name:ident, $mask_type:ty, $msb_mask:expr) => {
+        #[inline]
+        fn $fn_name(ws_mask: $mask_type, seen_space_before: bool) -> (usize, bool) {
+            let not_ws = !ws_mask;
 
-    // Shift LEFT by 1 to get "previous byte was whitespace"
-    // For bit i: we want to know if bit i-1 was set
-    // Fill LSB (bit 0) with seen_space_before state
-    let prev_was_ws = (ws_mask << 1) | (if seen_space_before { 1 } else { 0 });
+            // Shift LEFT by 1 to get "previous byte was whitespace"
+            // For bit i: we want to know if bit i-1 was set
+            // Fill LSB (bit 0) with seen_space_before state
+            let prev_was_ws = (ws_mask << 1) | (if seen_space_before { 1 } else { 0 });
 
-    // Word starts: current is not_ws AND previous was whitespace
-    let word_starts = not_ws & prev_was_ws;
-    let count = word_starts.count_ones() as usize;
+            // Word starts: current is not_ws AND previous was whitespace
+            let word_starts = not_ws & prev_was_ws;
+            let count = word_starts.count_ones() as usize;
 
-    // Update: last byte is whitespace?
-    let last_is_ws = (ws_mask & 0x8000) != 0;
+            // Update: last byte is whitespace?
+            let last_is_ws = (ws_mask & $msb_mask) != 0;
 
-    (count, last_is_ws)
+            (count, last_is_ws)
+        }
+    };
 }
 
-/// Count word starts from whitespace mask (32-bit for AVX2)
-/// A word start is: not_ws[i] && prev_was_ws[i-1]
-#[inline]
-fn count_word_starts_from_mask_u32(ws_mask: u32, seen_space_before: bool) -> (usize, bool) {
-    let not_ws = !ws_mask;
-
-    // Shift LEFT by 1 to get "previous byte was whitespace"
-    let prev_was_ws = (ws_mask << 1) | (if seen_space_before { 1 } else { 0 });
-
-    // Word starts: current is not_ws AND previous was whitespace
-    let word_starts = not_ws & prev_was_ws;
-    let count = word_starts.count_ones() as usize;
-
-    // Update: last byte is whitespace?
-    let last_is_ws = (ws_mask & 0x80000000) != 0;
-
-    (count, last_is_ws)
-}
-
-/// Count word starts from whitespace mask (64-bit for AVX512)
-/// A word start is: not_ws[i] && prev_was_ws[i-1]
-#[inline]
-fn count_word_starts_from_mask_u64(ws_mask: u64, seen_space_before: bool) -> (usize, bool) {
-    let not_ws = !ws_mask;
-
-    // Shift LEFT by 1 to get "previous byte was whitespace"
-    let prev_was_ws = (ws_mask << 1) | (if seen_space_before { 1 } else { 0 });
-
-    // Word starts: current is not_ws AND previous was whitespace
-    let word_starts = not_ws & prev_was_ws;
-    let count = word_starts.count_ones() as usize;
-
-    // Update: last byte is whitespace?
-    let last_is_ws = (ws_mask & 0x8000000000000000) != 0;
-
-    (count, last_is_ws)
-}
+// Generate word counting functions for each SIMD level
+count_word_starts_impl!(count_word_starts_from_mask, u16, 0x8000); // SSE2: 16 bytes
+count_word_starts_impl!(count_word_starts_from_mask_u32, u32, 0x80000000); // AVX2: 32 bytes
+count_word_starts_impl!(count_word_starts_from_mask_u64, u64, 0x8000000000000000); // AVX512: 64 bytes
 
 /// Process data using scalar fallback, handling UTF-8 carry buffer
 ///
@@ -412,6 +387,55 @@ macro_rules! define_simd_text_counter {
     };
 }
 
+// ============================================================================
+// Generate SIMD Implementations
+// ============================================================================
+
+// Generate SSE2 implementation using the macro
+define_simd_text_counter!(
+    fn_name: count_text_sse2,
+    vec_type: __m128i,
+    chunk_size: 16,
+    mask_type: u16,
+    target_feature: "sse2",
+    load_fn: _mm_loadu_si128,
+    count_newlines_fn: sse2_count_newlines,
+    has_non_ascii_fn: sse2_has_non_ascii,
+    count_utf8_chars_fn: sse2_count_utf8_chars,
+    detect_whitespace_fn: sse2_detect_whitespace,
+    count_word_starts_fn: count_word_starts_from_mask,
+);
+
+// Generate AVX2 implementation using the macro
+define_simd_text_counter!(
+    fn_name: count_text_avx2,
+    vec_type: __m256i,
+    chunk_size: 32,
+    mask_type: u32,
+    target_feature: "avx2",
+    load_fn: _mm256_loadu_si256,
+    count_newlines_fn: avx2_count_newlines,
+    has_non_ascii_fn: avx2_has_non_ascii,
+    count_utf8_chars_fn: avx2_count_utf8_chars,
+    detect_whitespace_fn: avx2_detect_whitespace,
+    count_word_starts_fn: count_word_starts_from_mask_u32,
+);
+
+// Generate AVX512BW implementation using the macro
+define_simd_text_counter!(
+    fn_name: count_text_avx512bw,
+    vec_type: __m512i,
+    chunk_size: 64,
+    mask_type: u64,
+    target_feature: "avx512bw",
+    load_fn: _mm512_loadu_si512,
+    count_newlines_fn: avx512_count_newlines,
+    has_non_ascii_fn: avx512_has_non_ascii,
+    count_utf8_chars_fn: avx512_count_utf8_chars,
+    detect_whitespace_fn: avx512_detect_whitespace,
+    count_word_starts_fn: count_word_starts_from_mask_u64,
+);
+
 /// Manual SSE2 implementation - kept for reference/documentation
 /// This shows what the macro generates
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -471,52 +495,3 @@ pub(crate) unsafe fn count_text_sse2_manual(content: &[u8], locale: LocaleEncodi
 
     result_acc
 }
-
-// ============================================================================
-// Generate SIMD Implementations
-// ============================================================================
-
-// Generate SSE2 implementation using the macro
-define_simd_text_counter!(
-    fn_name: count_text_sse2,
-    vec_type: __m128i,
-    chunk_size: 16,
-    mask_type: u16,
-    target_feature: "sse2",
-    load_fn: _mm_loadu_si128,
-    count_newlines_fn: sse2_count_newlines,
-    has_non_ascii_fn: sse2_has_non_ascii,
-    count_utf8_chars_fn: sse2_count_utf8_chars,
-    detect_whitespace_fn: sse2_detect_whitespace,
-    count_word_starts_fn: count_word_starts_from_mask,
-);
-
-// Generate AVX2 implementation using the macro
-define_simd_text_counter!(
-    fn_name: count_text_avx2,
-    vec_type: __m256i,
-    chunk_size: 32,
-    mask_type: u32,
-    target_feature: "avx2",
-    load_fn: _mm256_loadu_si256,
-    count_newlines_fn: avx2_count_newlines,
-    has_non_ascii_fn: avx2_has_non_ascii,
-    count_utf8_chars_fn: avx2_count_utf8_chars,
-    detect_whitespace_fn: avx2_detect_whitespace,
-    count_word_starts_fn: count_word_starts_from_mask_u32,
-);
-
-// Generate AVX512BW implementation using the macro
-define_simd_text_counter!(
-    fn_name: count_text_avx512bw,
-    vec_type: __m512i,
-    chunk_size: 64,
-    mask_type: u64,
-    target_feature: "avx512bw",
-    load_fn: _mm512_loadu_si512,
-    count_newlines_fn: avx512_count_newlines,
-    has_non_ascii_fn: avx512_has_non_ascii,
-    count_utf8_chars_fn: avx512_count_utf8_chars,
-    detect_whitespace_fn: avx512_detect_whitespace,
-    count_word_starts_fn: count_word_starts_from_mask_u64,
-);

@@ -16,13 +16,19 @@ mod tests {
         let result = count_text_simd(input, locale).expect("simd should be available on x86_64");
         assert_eq!(result, expected);
     }
-
     // Test SSE2 implementation specifically
     // SSE2 is available on all x86_64 CPUs, so we can test it directly
     #[apply(common_word_count_cases)]
     fn test_count_text_sse2(input: &str, locale: LocaleEncoding, expected: FileCounts) {
         if is_x86_feature_detected!("sse2") {
             let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), locale) };
+            assert_eq!(result, expected);
+        }
+    }
+    #[apply(common_word_count_cases)]
+    fn test_count_text_sse2_manual(input: &str, locale: LocaleEncoding, expected: FileCounts) {
+        if is_x86_feature_detected!("sse2") {
+            let result = unsafe { crate::wc_x86::count_text_sse2_manual(input.as_bytes(), locale) };
             assert_eq!(result, expected);
         }
     }
