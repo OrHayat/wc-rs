@@ -21,16 +21,25 @@ fn main() {
             if coverage_enabled {
                 println!("cargo:warning=Building C code with coverage instrumentation");
 
-                // Platform-specific coverage flags
-                let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+                // Detect which compiler we're using
+                let compiler = build.get_compiler();
+                let is_clang = compiler.is_like_clang();
+                let is_gcc = compiler.is_like_gnu();
 
-                if target_os == "linux" {
-                    // Linux with GCC: use gcov-style coverage
-                    build.flag("--coverage");  // Shorthand for -fprofile-arcs -ftest-coverage
-                } else {
-                    // macOS/other with Clang: use LLVM coverage
+                if is_clang {
+                    // Clang (macOS default, or Linux with clang): use LLVM coverage
                     build.flag("-fprofile-instr-generate");
                     build.flag("-fcoverage-mapping");
+                    println!("cargo:warning=Using Clang LLVM coverage instrumentation");
+                } else if is_gcc {
+                    // GCC: use gcov-style coverage
+                    build.flag("--coverage");  // Shorthand for -fprofile-arcs -ftest-coverage
+                    println!("cargo:warning=Using GCC gcov coverage instrumentation");
+                } else {
+                    // Fallback: try LLVM style
+                    build.flag("-fprofile-instr-generate");
+                    build.flag("-fcoverage-mapping");
+                    println!("cargo:warning=Unknown compiler, trying LLVM coverage instrumentation");
                 }
             } else {
                 build.flag("-O3");  // Optimize for performance (only when not doing coverage)
@@ -38,13 +47,18 @@ fn main() {
 
             build.compile("wc_arm64_sve");
 
-            // Link with gcov when coverage is enabled on Linux
+            // Link with gcov when coverage is enabled with GCC
             if coverage_enabled {
-                let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-                if target_os == "linux" {
-                    // Add gcc library path and link with gcov on Linux
-                    println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
-                    println!("cargo:rustc-link-lib=static=gcov");
+                let compiler = build.get_compiler();
+                if compiler.is_like_gnu() {
+                    // GCC needs gcov library
+                    // Try to find the gcov library path
+                    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+                    if target_os == "linux" {
+                        // Common path on Linux
+                        println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
+                        println!("cargo:rustc-link-lib=static=gcov");
+                    }
                 }
             }
 
