@@ -12,6 +12,8 @@ mod wc_default;
 mod wc_default_test;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod wc_x86;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod wc_x86_test;
 
 /// File statistics for word count operations
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -154,7 +156,7 @@ fn count_text(content: &str, locale: LocaleEncoding) -> FileCounts {
     // Try SIMD first based on architecture
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if let Some(simd_result) = wc_x86::count_text_simd(content.as_bytes(), locale) {
+        if let Some(simd_result) = wc_x86::count_text_simd(content, locale) {
             return simd_result;
         }
     }

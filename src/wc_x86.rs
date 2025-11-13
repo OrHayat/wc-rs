@@ -7,8 +7,10 @@
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use std::arch::x86_64::*;
 
-use crate::wc_default;
 use crate::FileCounts;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+use crate::LocaleEncoding;
+use crate::wc_default;
 
 /// Internal SIMD results
 #[derive(Debug, Clone, Copy)]
@@ -19,9 +21,9 @@ struct SimdCounts {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
+pub fn count_text_simd(content: &str, locale: LocaleEncoding) -> Option<FileCounts> {
     if is_x86_feature_detected!("sse2") {
-        let simd_result = unsafe { count_text_sse2(content) };
+        let simd_result = unsafe { count_text_sse2(content.as_bytes(), locale) };
         return Some(FileCounts {
             lines: simd_result.lines,
             words: simd_result.words,
@@ -32,57 +34,164 @@ pub fn count_text_simd(content: &[u8]) -> Option<FileCounts> {
     None
 }
 
+// ============================================================================
+// SSE2 Helper Functions - Reusable for AVX2/AVX-512
+// ============================================================================
+
+/// Count newlines in a SIMD chunk
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
-fn count_text_sse2(content: &[u8]) -> SimdCounts {
-    const CHUNK_SIZE: usize = 16; // SSE2 processes 16 bytes at a time
-    let mut res = SimdCounts {
+#[inline]
+unsafe fn sse2_count_newlines(chunk: __m128i) -> usize {
+    let newline_vec = _mm_set1_epi8(b'\n' as i8);
+    let cmp = _mm_cmpeq_epi8(chunk, newline_vec);
+    let mask = _mm_movemask_epi8(cmp) as u16;
+    mask.count_ones() as usize
+}
+
+/// Check if chunk contains non-ASCII bytes (> 0x7F)
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "sse2")]
+#[inline]
+unsafe fn sse2_has_non_ascii(chunk: __m128i) -> bool {
+    let threshold = _mm_set1_epi8(0x7F as i8);
+    let cmp = _mm_cmpgt_epi8(chunk, threshold);
+    _mm_movemask_epi8(cmp) != 0
+}
+
+/// Count UTF-8 characters (non-continuation bytes)
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "sse2")]
+#[inline]
+unsafe fn sse2_count_utf8_chars(chunk: __m128i) -> usize {
+    let cont_mask = _mm_set1_epi8(0b11000000u8 as i8);
+    let cont_pattern = _mm_set1_epi8(0b10000000u8 as i8);
+
+    let masked = _mm_and_si128(chunk, cont_mask);
+    let is_continuation = _mm_cmpeq_epi8(masked, cont_pattern);
+    let cont_bits = _mm_movemask_epi8(is_continuation) as u16;
+
+    16 - cont_bits.count_ones() as usize
+}
+
+/// Detect ASCII whitespace: space (0x20) or range [0x09-0x0D]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "sse2")]
+#[inline]
+unsafe fn sse2_detect_whitespace(chunk: __m128i) -> u16 {
+    let ws_min = _mm_set1_epi8(0x09u8 as i8); // tab
+    let ws_max = _mm_set1_epi8(0x0Du8 as i8); // CR
+    let space = _mm_set1_epi8(0x20u8 as i8);
+
+    // Range check: [0x09, 0x0D]
+    let ge_min = _mm_cmpgt_epi8(chunk, _mm_sub_epi8(ws_min, _mm_set1_epi8(1)));
+    let le_max = _mm_cmpgt_epi8(_mm_add_epi8(ws_max, _mm_set1_epi8(1)), chunk);
+    let in_range = _mm_and_si128(ge_min, le_max);
+
+    // Check space
+    let is_space = _mm_cmpeq_epi8(chunk, space);
+
+    // Combine
+    let is_ws = _mm_or_si128(in_range, is_space);
+    _mm_movemask_epi8(is_ws) as u16
+}
+
+/// Count word starts from whitespace mask
+/// A word start is: not_ws[i] && prev_was_ws[i-1]
+#[inline]
+fn count_word_starts_from_mask(ws_mask: u16, seen_space_before: bool) -> (usize, bool) {
+    let not_ws = !ws_mask;
+
+    // Shift LEFT by 1 to get "previous byte was whitespace"
+    // For bit i: we want to know if bit i-1 was set
+    // Fill LSB (bit 0) with seen_space_before state
+    let prev_was_ws = (ws_mask << 1) | (if seen_space_before { 1 } else { 0 });
+
+    // Word starts: current is not_ws AND previous was whitespace
+    let word_starts = not_ws & prev_was_ws;
+    let count = word_starts.count_ones() as usize;
+
+    // Update: last byte is whitespace?
+    let last_is_ws = (ws_mask & 0x8000) != 0;
+
+    (count, last_is_ws)
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "sse2")]
+unsafe fn count_text_sse2(content: &[u8], locale: LocaleEncoding) -> SimdCounts {
+    unsafe { count_text_sse2_manual(content, locale) }
+}
+// ============================================================================
+// legacy SSE2 Implementation - kept for doc
+// ============================================================================
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "sse2")]
+unsafe fn count_text_sse2_manual(content: &[u8], locale: LocaleEncoding) -> SimdCounts {
+    const CHUNK_SIZE: usize = 16;
+    let mut counts = SimdCounts {
         lines: 0,
         words: 0,
         chars: 0,
     };
-    let newline_vec = _mm_set1_epi8('\n' as i8); // \n  in each lane
-    let space_vec = _mm_set1_epi8(b' ' as i8);
-    let tab_vec = _mm_set1_epi8(b'\t' as i8);
-    let cr_vec = _mm_set1_epi8(b'\r' as i8);
-    let ff_vec = _mm_set1_epi8(0x0C as i8);
-    let vt_vec = _mm_set1_epi8(0x0B as i8);
-    let utf8_cont_mask = _mm_set1_epi8(0b11000000u8 as i8); // Mask to isolate top 2 bits
     let mut chunks = content.chunks_exact(CHUNK_SIZE);
 
+    let mut seen_space = true;
+    let mut carry: Vec<u8> = Vec::with_capacity(3);
+
     for chunk in chunks.by_ref() {
-        let chunk = unsafe { _mm_loadu_si128(chunk.as_ptr() as *const __m128i) };
-        let newlines_mask = unsafe { sse2_extract_newline_mask(chunk, newline_vec) };
-        res.lines += newlines_mask.count_ones() as usize;
-        let cont_mask = unsafe { sse2_extract_cont_mask(chunk, utf8_cont_mask) };
-        res.chars += cont_mask.count_zeros() as usize; //1 is continuation byte so 0 is start of char or whole char in utf-8
+        let chunk_vec = unsafe { _mm_loadu_si128(chunk.as_ptr() as *const __m128i) };
+
+        let has_non_ascii = unsafe { sse2_has_non_ascii(chunk_vec) };
+        let has_carry = !carry.is_empty();
+
+        // Non-ASCII UTF-8: fallback to scalar for Unicode whitespace
+        if (has_non_ascii || has_carry) && locale == LocaleEncoding::Utf8 {
+            let mut combined = carry.clone();
+            combined.extend_from_slice(chunk);
+
+            let result = wc_default::word_count_scalar_with_state(&combined, seen_space, locale);
+            counts.lines += result.counts.lines;
+            counts.chars += result.counts.chars;
+            counts.words += result.counts.words;
+            seen_space = result.seen_space;
+
+            // Save incomplete UTF-8 sequence
+            carry.clear();
+            if result.incomplete_bytes > 0 {
+                let start = combined.len() - result.incomplete_bytes;
+                carry.extend_from_slice(&combined[start..]);
+            }
+        } else {
+            // Fast SIMD path: C locale or pure ASCII
+            counts.lines += unsafe { sse2_count_newlines(chunk_vec) };
+
+            counts.chars += match locale {
+                LocaleEncoding::C => CHUNK_SIZE,
+                LocaleEncoding::Utf8 => unsafe { sse2_count_utf8_chars(chunk_vec) },
+            };
+
+            let ws_mask = unsafe { sse2_detect_whitespace(chunk_vec) };
+            let (word_count, last_is_ws) = count_word_starts_from_mask(ws_mask, seen_space);
+            counts.words += word_count;
+            seen_space = last_is_ws;
+
+            carry.clear();
+        }
     }
-    let buf = chunks.remainder();
-    if !buf.is_empty() {
-        let buf_count = wc_default::word_count_scalar(buf);
-        res.chars += buf_count.chars;
-        res.lines += buf_count.lines;
-        res.words += buf_count.words;
-    };
-    res
-}
 
-/// function extract newline mask -
-/// for example a b \n \n c -> 0 0 1 1 0 ...
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[target_feature(enable = "sse2")]
-unsafe fn sse2_extract_newline_mask(chunk: __m128i, newline_vec: __m128i) -> u16 {
-    _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, newline_vec)) as u16
-}
+    // Process remainder
+    let remainder = chunks.remainder();
+    if !remainder.is_empty() || !carry.is_empty() {
+        let mut final_buf = carry;
+        final_buf.extend_from_slice(remainder);
 
-/// function extract continuation mask -
-/// For UTF-8 character counting: detect continuation bytes (10xxxxxx)
-/// UTF-8 continuation bytes are 0x80-0xBF (binary: 10000000 to 10111111
-/// so a->0
-///
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[target_feature(enable = "sse2")]
-unsafe fn sse2_extract_cont_mask(chunk: __m128i, cont_vec: __m128i) -> u16 {
-    let masked_chunk = _mm_and_si128(chunk, cont_vec);
-    _mm_movemask_epi8(_mm_cmpeq_epi8(masked_chunk, cont_vec)) as u16
+        let result = wc_default::word_count_scalar_with_state(&final_buf, seen_space, locale);
+        counts.chars += result.counts.chars;
+        counts.lines += result.counts.lines;
+        counts.words += result.counts.words;
+    }
+
+    counts
 }
