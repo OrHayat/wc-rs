@@ -13,15 +13,7 @@ mod tests {
     // This will run all 42 common test cases with the NEON implementation
     #[apply(common_word_count_cases)]
     fn test_count_text_simd(input: &str, locale: LocaleEncoding, expected: FileCounts) {
-        let result = count_text_simd(input, locale).expect("NEON should be available on aarch64");
+        let result = count_text_simd(input, locale).expect("simd should be available on x86_64");
         assert_eq!(result, expected);
     }
-
-    // NEON-specific test cases can be added here
-    // These test edge cases specific to SIMD implementation
-
-    // TODO: Add NEON-specific edge cases:
-    // - Chunk boundary cases (16-byte boundaries)
-    // - Very long strings (stress test SIMD loop)
-    // - Strings that trigger scalar fallback paths
 }

@@ -12,24 +12,10 @@ use crate::FileCounts;
 use crate::LocaleEncoding;
 use crate::wc_default;
 
-/// Internal SIMD results
-#[derive(Debug, Clone, Copy)]
-struct SimdCounts {
-    lines: usize,
-    words: usize,
-    chars: usize,
-}
-
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn count_text_simd(content: &str, locale: LocaleEncoding) -> Option<FileCounts> {
     if is_x86_feature_detected!("sse2") {
-        let simd_result = unsafe { count_text_sse2(content.as_bytes(), locale) };
-        return Some(FileCounts {
-            lines: simd_result.lines,
-            words: simd_result.words,
-            bytes: content.len(),
-            chars: simd_result.chars,
-        });
+        return Some(unsafe { count_text_sse2(content.as_bytes(), locale) });
     }
     None
 }
@@ -117,27 +103,55 @@ fn count_word_starts_from_mask(ws_mask: u16, seen_space_before: bool) -> (usize,
     (count, last_is_ws)
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[target_feature(enable = "sse2")]
-unsafe fn count_text_sse2(content: &[u8], locale: LocaleEncoding) -> SimdCounts {
-    unsafe { count_text_sse2_manual(content, locale) }
+/// Process data using scalar fallback, handling UTF-8 carry buffer
+///
+/// Combines carry buffer with new data, processes using scalar word counting,
+/// and updates the carry buffer with any incomplete UTF-8 sequences.
+///
+/// Returns the new `seen_space` state for word counting.
+#[inline]
+fn process_scalar_with_carry(
+    new_data: &[u8],
+    carry: &mut Vec<u8>,
+    counts: &mut FileCounts,
+    seen_space: bool,
+    locale: LocaleEncoding,
+) -> bool {
+    let mut combined = carry.clone();
+    combined.extend_from_slice(new_data);
+
+    let result = wc_default::word_count_scalar_with_state(&combined, seen_space, locale);
+
+    counts.lines += result.counts.lines;
+    counts.chars += result.counts.chars;
+    counts.words += result.counts.words;
+
+    // Update carry buffer with incomplete UTF-8 sequences
+    carry.clear();
+    if result.incomplete_bytes > 0 {
+        let start = combined.len() - result.incomplete_bytes;
+        carry.extend_from_slice(&combined[start..]);
+    }
+
+    result.seen_space
 }
-// ============================================================================
-// legacy SSE2 Implementation - kept for doc
-// ============================================================================
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
-unsafe fn count_text_sse2_manual(content: &[u8], locale: LocaleEncoding) -> SimdCounts {
+unsafe fn count_text_sse2(content: &[u8], locale: LocaleEncoding) -> FileCounts {
     const CHUNK_SIZE: usize = 16;
-    let mut counts = SimdCounts {
+    let mut result_acc = FileCounts {
         lines: 0,
         words: 0,
         chars: 0,
+        bytes: content.len(),
     };
     let mut chunks = content.chunks_exact(CHUNK_SIZE);
 
+    // Word counting state: tracks if previous byte was whitespace
     let mut seen_space = true;
+
+    // UTF-8 carry buffer: incomplete multi-byte sequences at chunk boundaries
     let mut carry: Vec<u8> = Vec::with_capacity(3);
 
     for chunk in chunks.by_ref() {
@@ -146,35 +160,24 @@ unsafe fn count_text_sse2_manual(content: &[u8], locale: LocaleEncoding) -> Simd
         let has_non_ascii = unsafe { sse2_has_non_ascii(chunk_vec) };
         let has_carry = !carry.is_empty();
 
-        // Non-ASCII UTF-8: fallback to scalar for Unicode whitespace
+        // Choose processing path based on content and locale
+        // Scalar path: UTF-8 locale with non-ASCII or incomplete sequences
+        // SIMD path: C locale (any bytes) OR pure ASCII UTF-8
         if (has_non_ascii || has_carry) && locale == LocaleEncoding::Utf8 {
-            let mut combined = carry.clone();
-            combined.extend_from_slice(chunk);
-
-            let result = wc_default::word_count_scalar_with_state(&combined, seen_space, locale);
-            counts.lines += result.counts.lines;
-            counts.chars += result.counts.chars;
-            counts.words += result.counts.words;
-            seen_space = result.seen_space;
-
-            // Save incomplete UTF-8 sequence
-            carry.clear();
-            if result.incomplete_bytes > 0 {
-                let start = combined.len() - result.incomplete_bytes;
-                carry.extend_from_slice(&combined[start..]);
-            }
+            seen_space =
+                process_scalar_with_carry(chunk, &mut carry, &mut result_acc, seen_space, locale);
         } else {
             // Fast SIMD path: C locale or pure ASCII
-            counts.lines += unsafe { sse2_count_newlines(chunk_vec) };
+            result_acc.lines += unsafe { sse2_count_newlines(chunk_vec) };
 
-            counts.chars += match locale {
+            result_acc.chars += match locale {
                 LocaleEncoding::C => CHUNK_SIZE,
                 LocaleEncoding::Utf8 => unsafe { sse2_count_utf8_chars(chunk_vec) },
             };
 
             let ws_mask = unsafe { sse2_detect_whitespace(chunk_vec) };
             let (word_count, last_is_ws) = count_word_starts_from_mask(ws_mask, seen_space);
-            counts.words += word_count;
+            result_acc.words += word_count;
             seen_space = last_is_ws;
 
             carry.clear();
@@ -184,14 +187,8 @@ unsafe fn count_text_sse2_manual(content: &[u8], locale: LocaleEncoding) -> Simd
     // Process remainder
     let remainder = chunks.remainder();
     if !remainder.is_empty() || !carry.is_empty() {
-        let mut final_buf = carry;
-        final_buf.extend_from_slice(remainder);
-
-        let result = wc_default::word_count_scalar_with_state(&final_buf, seen_space, locale);
-        counts.chars += result.counts.chars;
-        counts.lines += result.counts.lines;
-        counts.words += result.counts.words;
+        process_scalar_with_carry(remainder, &mut carry, &mut result_acc, seen_space, locale);
     }
 
-    counts
+    result_acc
 }
