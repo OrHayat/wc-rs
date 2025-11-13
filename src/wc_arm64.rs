@@ -248,7 +248,6 @@ unsafe fn count_text_neon(content: &[u8], locale: LocaleEncoding) -> FileCounts 
             counts.lines += result.counts.lines;
             counts.words += result.counts.words;
             counts.chars += result.counts.chars;
-            // Note: incomplete_bytes at EOF are ignored (partial character at end of file)
         }
 
         counts
