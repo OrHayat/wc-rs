@@ -20,19 +20,32 @@ fn main() {
 
             if coverage_enabled {
                 println!("cargo:warning=Building C code with coverage instrumentation");
-                // Use GCC-style coverage flags (works with gcc)
-                build.flag("--coverage");  // Shorthand for -fprofile-arcs -ftest-coverage
+
+                // Platform-specific coverage flags
+                let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+                if target_os == "linux" {
+                    // Linux with GCC: use gcov-style coverage
+                    build.flag("--coverage");  // Shorthand for -fprofile-arcs -ftest-coverage
+                } else {
+                    // macOS/other with Clang: use LLVM coverage
+                    build.flag("-fprofile-instr-generate");
+                    build.flag("-fcoverage-mapping");
+                }
             } else {
                 build.flag("-O3");  // Optimize for performance (only when not doing coverage)
             }
 
             build.compile("wc_arm64_sve");
 
-            // Link with gcov when coverage is enabled
+            // Link with gcov when coverage is enabled on Linux
             if coverage_enabled {
-                // Add gcc library path and link with gcov
-                println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
-                println!("cargo:rustc-link-lib=static=gcov");
+                let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+                if target_os == "linux" {
+                    // Add gcc library path and link with gcov on Linux
+                    println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
+                    println!("cargo:rustc-link-lib=static=gcov");
+                }
             }
 
             println!("cargo:warning=SVE headers available - compiling SVE C code");

@@ -302,6 +302,10 @@ pub mod tests {
         LocaleEncoding::C,
         counts(0, 1, 12, 12)
     )] // nbsp not recognized
+    // C locale with ASCII >= 16 bytes (tests SIMD path on ARM64 NEON)
+    #[case::c_locale_ascii_16_bytes("abcdefghijklmnop", LocaleEncoding::C, counts(0, 1, 16, 16))] // Exactly 16 bytes
+    #[case::c_locale_ascii_32_bytes("hello world test data here!!", LocaleEncoding::C, counts(0, 5, 28, 28))] // 28 bytes, multiple chunks
+    #[case::c_locale_ascii_48_bytes("the quick brown fox jumps over the lazy dog here", LocaleEncoding::C, counts(0, 10, 48, 48))] // 48 bytes
     // Extreme cases
     #[case::only_replacement_chars("\u{FFFD}\u{FFFD}\u{FFFD}", LocaleEncoding::Utf8, counts(0, 1, 3, 9))]
     // Zero-width spaces are NOT whitespace, so they form a word (not empty!)
