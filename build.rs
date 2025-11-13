@@ -1,82 +1,94 @@
 fn main() {
-    // Only compile SVE C code when building for ARM64 and compiler can compile SVE
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
     if target_arch == "aarch64" {
-        // Check if compiler can compile SVE code (has headers and toolchain support)
-        if can_compile_sve() {
-            println!("cargo:rerun-if-changed=src/wc_arm64_sve.c");
-
-            let mut build = cc::Build::new();
-            build
-                .file("src/wc_arm64_sve.c")
-                .flag("-march=armv8.2-a+sve");  // Enable SVE instructions
-
-            // Add coverage flags when building with cargo llvm-cov
-            // Check for CARGO_LLVM_COV or RUSTFLAGS containing coverage flags
-            let coverage_enabled = std::env::var("CARGO_LLVM_COV").is_ok()
-                || std::env::var("RUSTFLAGS").unwrap_or_default().contains("instrument-coverage")
-                || std::env::var("RUSTFLAGS").unwrap_or_default().contains("profile-generate");
-
-            if coverage_enabled {
-                println!("cargo:warning=Building C code with coverage instrumentation");
-
-                // Detect which compiler we're using
-                let compiler = build.get_compiler();
-                let is_clang = compiler.is_like_clang();
-                let is_gcc = compiler.is_like_gnu();
-
-                if is_clang {
-                    // Clang (macOS default, or Linux with clang): use LLVM coverage
-                    build.flag("-fprofile-instr-generate");
-                    build.flag("-fcoverage-mapping");
-                    println!("cargo:warning=Using Clang LLVM coverage instrumentation");
-                } else if is_gcc {
-                    // GCC: use gcov-style coverage
-                    build.flag("--coverage");  // Shorthand for -fprofile-arcs -ftest-coverage
-                    println!("cargo:warning=Using GCC gcov coverage instrumentation");
-                } else {
-                    // Fallback: try LLVM style
-                    build.flag("-fprofile-instr-generate");
-                    build.flag("-fcoverage-mapping");
-                    println!("cargo:warning=Unknown compiler, trying LLVM coverage instrumentation");
-                }
-            } else {
-                build.flag("-O3");  // Optimize for performance (only when not doing coverage)
-            }
-
-            build.compile("wc_arm64_sve");
-
-            // Link with gcov when coverage is enabled with GCC
-            if coverage_enabled {
-                let compiler = build.get_compiler();
-                if compiler.is_like_gnu() {
-                    // GCC needs gcov library
-                    // Try to find the gcov library path
-                    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-                    if target_os == "linux" {
-                        // Common path on Linux
-                        println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
-                        println!("cargo:rustc-link-lib=static=gcov");
-                    }
-                }
-            }
-
-            println!("cargo:warning=SVE headers available - compiling SVE C code");
-
-            // Tell Rust code that SVE build is available
-            println!("cargo:rustc-cfg=feature=\"sve\"");
-        } else {
-            println!("cargo:warning=ARM64 detected but cannot compile SVE (missing headers or toolchain support)");
-        }
+        build_sve_if_available();
     }
 }
 
-fn can_compile_sve() -> bool {
-    use std::io::Write;
-    use std::process::Command;
+/// Attempts to build SVE C code if the toolchain supports it
+fn build_sve_if_available() {
+    println!("cargo:rerun-if-changed=src/wc_arm64_sve.c");
 
-    // Create a temporary test file
+    let mut build = cc::Build::new();
+    build.file("src/wc_arm64_sve.c");
+
+    // Test if this compiler can compile SVE before proceeding
+    if !can_compile_sve(&build.get_compiler()) {
+        println!("cargo:warning=ARM64 detected but cannot compile SVE (missing headers or toolchain support)");
+        return;
+    }
+
+    println!("cargo:warning=SVE headers available - compiling SVE C code");
+
+    build.flag("-march=armv8.2-a+sve");
+
+    let coverage_enabled = is_coverage_enabled();
+
+    if coverage_enabled {
+        configure_coverage(&mut build);
+    } else {
+        build.flag("-O3");
+    }
+
+    build.compile("wc_arm64_sve");
+
+    if coverage_enabled {
+        link_coverage_libraries(&build);
+    }
+}
+
+/// Checks if coverage instrumentation is enabled
+fn is_coverage_enabled() -> bool {
+    std::env::var("CARGO_LLVM_COV").is_ok()
+        || std::env::var("RUSTFLAGS").unwrap_or_default().contains("instrument-coverage")
+        || std::env::var("RUSTFLAGS").unwrap_or_default().contains("profile-generate")
+}
+
+/// Configures coverage instrumentation flags based on the compiler
+fn configure_coverage(build: &mut cc::Build) {
+    println!("cargo:warning=Building C code with coverage instrumentation");
+
+    let compiler = build.get_compiler();
+
+    if compiler.is_like_clang() {
+        // Clang: use LLVM coverage instrumentation
+        build
+            .flag("-fprofile-instr-generate")
+            .flag("-fcoverage-mapping");
+        println!("cargo:warning=Using Clang LLVM coverage instrumentation");
+    } else if compiler.is_like_gnu() {
+        // GCC: use gcov-style coverage
+        build.flag("--coverage");
+        println!("cargo:warning=Using GCC gcov coverage instrumentation");
+    } else {
+        // Unknown compiler: try LLVM style as fallback
+        build
+            .flag("-fprofile-instr-generate")
+            .flag("-fcoverage-mapping");
+        println!("cargo:warning=Unknown compiler, trying LLVM coverage instrumentation");
+    }
+}
+
+/// Links coverage libraries when needed (GCC on Linux requires gcov)
+fn link_coverage_libraries(build: &cc::Build) {
+    let compiler = build.get_compiler();
+
+    if !compiler.is_like_gnu() {
+        return; // Only GCC needs gcov library
+    }
+
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "linux" {
+        println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
+        println!("cargo:rustc-link-lib=static=gcov");
+    }
+}
+
+/// Tests if the compiler can compile SVE code
+fn can_compile_sve(compiler: &cc::Tool) -> bool {
+    use std::io::Write;
+
     let test_code = r#"
 #ifdef __ARM_FEATURE_SVE
 #include <arm_sve.h>
@@ -91,28 +103,33 @@ int main() {
 
     let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| "/tmp".to_string());
     let test_file = format!("{}/test_sve.c", out_dir);
+    let test_obj = format!("{}/test_sve.o", out_dir);
 
     // Write test file
-    if let Ok(mut file) = std::fs::File::create(&test_file) {
-        if file.write_all(test_code.as_bytes()).is_err() {
-            return false;
-        }
-    } else {
+    let Ok(mut file) = std::fs::File::create(&test_file) else {
+        return false;
+    };
+
+    if file.write_all(test_code.as_bytes()).is_err() {
         return false;
     }
 
-    // Try to compile it
-    let result = Command::new("cc")
-        .arg("-march=armv8.2-a+sve")
-        .arg("-c")
-        .arg(&test_file)
-        .arg("-o")
-        .arg(format!("{}/test_sve.o", out_dir))
+    // Use the same compiler that will be used for the actual build
+
+    let result = compiler
+        .to_command()
+        .args([
+            "-march=armv8.2-a+sve",
+            "-c",
+            &test_file,
+            "-o",
+            &test_obj,
+        ])
         .output();
 
     // Clean up
     let _ = std::fs::remove_file(&test_file);
-    let _ = std::fs::remove_file(format!("{}/test_sve.o", out_dir));
+    let _ = std::fs::remove_file(&test_obj);
 
     result.map(|output| output.status.success()).unwrap_or(false)
 }
