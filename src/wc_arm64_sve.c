@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <arm_sve.h>
+#include "../vendor/utf8.h"
 
 // Platform-specific headers for CPU detection
 #if defined(__linux__)
@@ -83,6 +84,37 @@ static inline bool cpu_supports_sve(void) {
     // Unknown platform - assume no SVE
     return false;
 #endif
+}
+
+// ============================================================================
+// Unicode Whitespace Detection
+// ============================================================================
+
+// Check if a Unicode codepoint is whitespace
+// Matches Rust's char::is_whitespace() behavior
+static inline bool is_unicode_whitespace(utf8_int32_t codepoint) {
+    // ASCII whitespace (fast path)
+    if (codepoint == 0x20 || (codepoint >= 0x09 && codepoint <= 0x0D)) {
+        return true;
+    }
+
+    // Unicode whitespace characters
+    switch (codepoint) {
+        case 0x0085: // Next Line (NEL)
+        case 0x00A0: // No-Break Space (NBSP)
+        case 0x1680: // Ogham Space Mark
+        case 0x2000: case 0x2001: case 0x2002: case 0x2003: case 0x2004:
+        case 0x2005: case 0x2006: case 0x2007: case 0x2008: case 0x2009:
+        case 0x200A: // Various spaces
+        case 0x2028: // Line Separator
+        case 0x2029: // Paragraph Separator
+        case 0x202F: // Narrow No-Break Space
+        case 0x205F: // Medium Mathematical Space
+        case 0x3000: // Ideographic Space
+            return true;
+        default:
+            return false;
+    }
 }
 
 // ============================================================================
@@ -280,25 +312,38 @@ FileCounts count_text_sve_c_unchecked(
             result.words += sve_count_words(pg, chunk, &seen_space, &last_is_ws);
         } else {
             // Fallback: scalar processing for non-ASCII UTF-8
-            // This is simplified - production code would use carry buffer
-            for (size_t j = 0; j < vl; j++) {
-                uint8_t byte = content[i + j];
+            // Decode UTF-8 and check Unicode whitespace
+            const uint8_t *chunk_start = content + i;
+            const uint8_t *chunk_end = chunk_start + vl;
+            void *ptr = (void *)chunk_start;
 
-                if (byte == '\n') {
+            while (ptr < (void *)chunk_end) {
+                utf8_int32_t codepoint;
+                void *next_ptr = utf8codepoint(ptr, &codepoint);
+
+                // Check if we successfully decoded
+                if (next_ptr == ptr || next_ptr > (void *)chunk_end) {
+                    // Invalid UTF-8 or would read past end - skip this byte
+                    ptr = (uint8_t *)ptr + 1;
+                    continue;
+                }
+
+                // Count character
+                result.chars++;
+
+                // Count newlines
+                if (codepoint == '\n') {
                     result.lines++;
                 }
 
-                // UTF-8 character counting: skip continuation bytes
-                if ((byte & 0b11000000) != 0b10000000) {
-                    result.chars++;
-                }
-
-                // Word counting
-                bool is_ws = (byte == ' ' || (byte >= 0x09 && byte <= 0x0D));
+                // Word counting with Unicode whitespace support
+                bool is_ws = is_unicode_whitespace(codepoint);
                 if (!is_ws && seen_space) {
                     result.words++;
                 }
                 seen_space = is_ws;
+
+                ptr = next_ptr;
             }
         }
 
@@ -326,23 +371,38 @@ FileCounts count_text_sve_c_unchecked(
 
             result.words += sve_count_words(pg, chunk, &seen_space, &last_is_ws);
         } else {
-            // Scalar fallback for remainder
-            for (size_t j = 0; j < remaining; j++) {
-                uint8_t byte = content[i + j];
+            // Scalar fallback for remainder with UTF-8 decoding
+            const uint8_t *chunk_start = content + i;
+            const uint8_t *chunk_end = chunk_start + remaining;
+            void *ptr = (void *)chunk_start;
 
-                if (byte == '\n') {
+            while (ptr < (void *)chunk_end) {
+                utf8_int32_t codepoint;
+                void *next_ptr = utf8codepoint(ptr, &codepoint);
+
+                // Check if we successfully decoded
+                if (next_ptr == ptr || next_ptr > (void *)chunk_end) {
+                    // Invalid UTF-8 or would read past end - skip this byte
+                    ptr = (uint8_t *)ptr + 1;
+                    continue;
+                }
+
+                // Count character
+                result.chars++;
+
+                // Count newlines
+                if (codepoint == '\n') {
                     result.lines++;
                 }
 
-                if ((byte & 0b11000000) != 0b10000000) {
-                    result.chars++;
-                }
-
-                bool is_ws = (byte == ' ' || (byte >= 0x09 && byte <= 0x0D));
+                // Word counting with Unicode whitespace support
+                bool is_ws = is_unicode_whitespace(codepoint);
                 if (!is_ws && seen_space) {
                     result.words++;
                 }
                 seen_space = is_ws;
+
+                ptr = next_ptr;
             }
         }
     }

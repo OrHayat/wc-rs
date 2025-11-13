@@ -154,6 +154,32 @@ pub mod tests {
     // Edge case: leading whitespace
     #[case::leading_space(" hello", LocaleEncoding::Utf8, counts(0, 1, 6, 6))]
     #[case::leading_newline("\nhello", LocaleEncoding::Utf8, counts(1, 1, 6, 6))]
+    // Chunk boundary tests: UTF-8 characters split across 16-byte SIMD boundaries
+    // These test incomplete UTF-8 handling at chunk boundaries
+    // Test case: 15 ASCII bytes + 3-byte UTF-8 em-space (U+2003 = E2 80 83) + 5 ASCII
+    // Total: 23 bytes, 21 chars, 2 words
+    // The em-space will be split at 16-byte boundary: first chunk gets "E2", next gets "80 83"
+    #[case::chunk_boundary_16_3byte_split(
+        "123456789012345\u{2003}world",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 21, 23)
+    )]
+    // Test case: 14 ASCII bytes + 2-byte UTF-8 nbsp (U+00A0 = C2 A0) + 5 ASCII
+    // Total: 21 bytes, 20 chars, 2 words
+    // The nbsp will be split at 16-byte boundary
+    #[case::chunk_boundary_16_2byte_split(
+        "12345678901234\u{00A0}world",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 20, 21)
+    )]
+    // Test case: 13 ASCII bytes + 4-byte emoji (💯 = F0 9F 92 AF) + space + 5 ASCII
+    // Total: 23 bytes, 20 chars, 2 words
+    // The emoji will be split at 16-byte boundary: chunk1 gets "F0", chunk2 gets "9F 92 AF"
+    #[case::chunk_boundary_16_4byte_split(
+        "1234567890123💯 world",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 20, 23)
+    )]
     pub fn common_word_count_cases(
         #[case] input: &str,
         #[case] locale: LocaleEncoding,

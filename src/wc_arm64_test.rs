@@ -1,7 +1,6 @@
 #[cfg(test)]
 #[cfg(target_arch = "aarch64")]
 mod tests {
-    use crate::wc_arm64::count_text_simd;
     use crate::wc_default_test::tests::common_word_count_cases;
     use crate::{FileCounts, LocaleEncoding};
     use pretty_assertions::assert_eq;
@@ -13,11 +12,11 @@ mod tests {
     use crate::wc_default_test::tests::counts;
 
     // Apply the common template to test NEON implementation
-    // This will run all 42 common test cases with the NEON implementation
+    // This will run all common test cases with the NEON implementation directly (not SVE!)
     #[apply(common_word_count_cases)]
     fn test_word_count_neon(input: &str, locale: LocaleEncoding, expected: FileCounts) {
-        let result = count_text_simd(input.as_bytes(), locale)
-            .expect("NEON should be available on aarch64");
+        // Call count_text_neon directly to ensure we're testing NEON, not SVE
+        let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), locale) };
         assert_eq!(result, expected);
     }
 
