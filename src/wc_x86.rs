@@ -286,20 +286,21 @@ fn process_scalar_with_carry(
     seen_space: bool,
     locale: LocaleEncoding,
 ) -> bool {
-    let mut combined = carry.clone();
-    combined.extend_from_slice(new_data);
+    carry.extend_from_slice(new_data);
 
-    let result = wc_default::word_count_scalar_with_state(&combined, seen_space, locale);
+    let result = wc_default::word_count_scalar_with_state(carry, seen_space, locale);
 
     counts.lines += result.counts.lines;
     counts.chars += result.counts.chars;
     counts.words += result.counts.words;
 
     // Update carry buffer with incomplete UTF-8 sequences
-    carry.clear();
     if result.incomplete_bytes > 0 {
-        let start = combined.len() - result.incomplete_bytes;
-        carry.extend_from_slice(&combined[start..]);
+        let start = carry.len() - result.incomplete_bytes;
+        carry.copy_within(start.., 0);
+        carry.truncate(result.incomplete_bytes);
+    } else {
+        carry.clear();
     }
 
     result.seen_space
