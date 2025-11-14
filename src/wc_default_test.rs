@@ -332,6 +332,20 @@ pub mod tests {
         counts(0, 1, 3, 9)
     )]
     #[case::word_ending_at_exact_16("12345678901234 w", LocaleEncoding::Utf8, counts(0, 2, 16, 16))]
+    // PropTest regression: AVX2 has_non_ascii bug (missing negative byte check for 0x80-0xFF)
+    // 4-byte UTF-8 char split across 32-byte AVX2 boundary (byte 29-32: f0 90 a3 a0)
+    #[case::proptest_avx2_regression_complex_unicode(
+        "A ࠰®0᥀ 𑊟᰻0🪀¡0®𐣠A",
+        LocaleEncoding::Utf8,
+        counts(0, 3, 16, 34)
+    )]
+    // PropTest regression: AVX512 has_non_ascii bug (same issue as AVX2)
+    // Complex Unicode with various multi-byte characters
+    #[case::proptest_avx512_regression_complex_unicode(
+        "a \u{c55}𐀼\u{cbc}a𐖌aa🉠𞹟🠀a𝼀® ฿ጒ a🌀 ®   𞅎\u{1e01b}𐨕",
+        LocaleEncoding::Utf8,
+        counts(0, 6, 29, 69)
+    )]
     pub fn common_word_count_cases(
         #[case] input: &str,
         #[case] locale: LocaleEncoding,
@@ -344,5 +358,78 @@ pub mod tests {
     fn test_word_count_scalar(input: &str, locale: LocaleEncoding, expected: FileCounts) {
         let result = word_count_scalar(input, locale);
         assert_eq!(result, expected);
+    }
+
+    // ====================================================================
+    // Property-Based Tests (PropTest)
+    // ====================================================================
+    use proptest::prelude::*;
+
+    // Test 1: Most basic invariant - bytes should equal input length
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_scalar(input in "\\PC*") {
+            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            prop_assert_eq!(result.bytes, input.len(),
+                "bytes should match input length");
+        }
+    }
+
+    // Property: bytes == input length (x86 SSE2)
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_sse2(input in "\\PC*") {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "SSE2");
+            }
+        }
+    }
+
+    // Property: bytes == input length (x86 AVX2)
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_avx2(input in "\\PC*") {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "AVX2");
+            }
+        }
+    }
+
+    // Property: bytes == input length (x86 AVX512BW)
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_avx512(input in "\\PC*") {
+            if is_x86_feature_detected!("avx512bw") {
+                let result = unsafe { crate::wc_x86::count_text_avx512bw(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "AVX512BW");
+            }
+        }
+    }
+
+    // Property: bytes == input length (ARM64 NEON)
+    #[cfg(target_arch = "aarch64")]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_neon(input in "\\PC*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+            prop_assert_eq!(result.bytes, input.len(), "NEON");
+        }
+    }
+
+    // Property: bytes == input length (ARM64 SVE)
+    #[cfg(target_arch = "aarch64")]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_sve(input in "\\PC*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "SVE");
+            }
+        }
     }
 }

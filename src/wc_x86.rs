@@ -127,7 +127,14 @@ unsafe fn avx2_count_newlines(chunk: __m256i) -> usize {
 unsafe fn avx2_has_non_ascii(chunk: __m256i) -> bool {
     let threshold = _mm256_set1_epi8(0x7F as i8);
     let cmp = _mm256_cmpgt_epi8(chunk, threshold);
-    _mm256_movemask_epi8(cmp) != 0
+    let mask = _mm256_movemask_epi8(cmp);
+
+    // Also check for negative bytes (>= 0x80) by checking if MSB is set
+    let zero = _mm256_setzero_si256();
+    let cmp_neg = _mm256_cmpgt_epi8(zero, chunk); // 0 > chunk means chunk < 0 (i.e., >= 0x80 unsigned)
+    let mask_neg = _mm256_movemask_epi8(cmp_neg);
+
+    (mask | mask_neg) != 0
 }
 
 /// Count UTF-8 characters in a 32-byte AVX2 chunk (non-continuation bytes)
@@ -188,7 +195,12 @@ unsafe fn avx512_count_newlines(chunk: __m512i) -> usize {
 unsafe fn avx512_has_non_ascii(chunk: __m512i) -> bool {
     let threshold = _mm512_set1_epi8(0x7F as i8);
     let mask = _mm512_cmpgt_epi8_mask(chunk, threshold);
-    mask != 0
+
+    // Also check for negative bytes (>= 0x80) by checking if MSB is set
+    let zero = _mm512_setzero_si512();
+    let mask_neg = _mm512_cmpgt_epi8_mask(zero, chunk); // 0 > chunk means chunk < 0
+
+    (mask | mask_neg) != 0
 }
 
 /// Count UTF-8 characters in a 64-byte AVX512BW chunk (non-continuation bytes)
