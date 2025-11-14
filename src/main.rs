@@ -116,7 +116,7 @@ fn process_stdin(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
 
 fn process_files(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
     for file_path in &args.files {
-        let content = std::fs::read_to_string(file_path)
+        let content = std::fs::read(file_path)
             .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
         let stats = count_text(&content, locale);
         print_stats(&stats, args, Some(file_path));
@@ -144,16 +144,16 @@ fn print_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&Path
     }
 }
 
-fn read_stdin() -> Result<String> {
-    let mut buffer = String::new();
+fn read_stdin() -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
     io::stdin()
-        .read_to_string(&mut buffer)
+        .read_to_end(&mut buffer)
         .context("failed to read from stdin")?;
     Ok(buffer)
 }
 
 /// Count text statistics using the fastest available method (SIMD or scalar)
-fn count_text(content: &str, locale: LocaleEncoding) -> FileCounts {
+fn count_text(content: &[u8], locale: LocaleEncoding) -> FileCounts {
     // Try SIMD first based on architecture
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
@@ -164,7 +164,7 @@ fn count_text(content: &str, locale: LocaleEncoding) -> FileCounts {
 
     #[cfg(target_arch = "aarch64")]
     {
-        if let Some(simd_result) = wc_arm64::count_text_simd(content.as_bytes(), locale) {
+        if let Some(simd_result) = wc_arm64::count_text_simd(content, locale) {
             return simd_result;
         }
     }

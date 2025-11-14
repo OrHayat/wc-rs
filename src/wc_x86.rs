@@ -13,20 +13,20 @@ use crate::LocaleEncoding;
 use crate::wc_default;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub fn count_text_simd(content: &str, locale: LocaleEncoding) -> Option<FileCounts> {
+pub fn count_text_simd(content: &[u8], locale: LocaleEncoding) -> Option<FileCounts> {
     // Priority: AVX512BW > AVX2 > SSE2
     // Note: We only check for AVX512BW (not AVX512F) as BW is required for efficient byte operations
 
     if is_x86_feature_detected!("avx512bw") {
-        return Some(unsafe { count_text_avx512(content.as_bytes(), locale) });
+        return Some(unsafe { count_text_avx512(content, locale) });
     }
 
     if is_x86_feature_detected!("avx2") {
-        return Some(unsafe { count_text_avx2(content.as_bytes(), locale) });
+        return Some(unsafe { count_text_avx2(content, locale) });
     }
 
     if is_x86_feature_detected!("sse2") {
-        return Some(unsafe { count_text_sse2(content.as_bytes(), locale) });
+        return Some(unsafe { count_text_sse2(content, locale) });
     }
 
     None

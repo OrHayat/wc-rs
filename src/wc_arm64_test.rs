@@ -212,7 +212,7 @@ mod tests {
     proptest! {
         #[test]
         fn prop_differential_neon_vs_scalar_utf8_ascii(input in "[\\x00-\\x7F]*") {
-            let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+            let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             let simd = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
 
             prop_assert_eq!(scalar.lines, simd.lines, "NEON: lines mismatch");
@@ -226,7 +226,7 @@ mod tests {
         #[test]
         fn prop_differential_sve_vs_scalar_utf8_ascii(input in "[\\x00-\\x7F]*") {
             if std::arch::is_aarch64_feature_detected!("sve") {
-                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
                 let simd = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
 
                 prop_assert_eq!(scalar.lines, simd.lines, "SVE: lines mismatch");
@@ -241,7 +241,7 @@ mod tests {
     proptest! {
         #[test]
         fn prop_differential_neon_vs_scalar_utf8_unicode(input in "\\PC*") {
-            let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+            let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             let simd = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
 
             prop_assert_eq!(scalar.lines, simd.lines, "NEON Unicode: lines mismatch");
@@ -255,7 +255,7 @@ mod tests {
         #[test]
         fn prop_differential_sve_vs_scalar_utf8_unicode(input in "\\PC*") {
             if std::arch::is_aarch64_feature_detected!("sve") {
-                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
                 let simd = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
 
                 prop_assert_eq!(scalar.lines, simd.lines, "SVE Unicode: lines mismatch");
@@ -270,7 +270,7 @@ mod tests {
     proptest! {
         #[test]
         fn prop_differential_neon_vs_scalar_utf8_all(input in ".*") {
-            let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+            let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             let simd = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
 
             prop_assert_eq!(scalar.lines, simd.lines, "NEON all: lines mismatch");
@@ -284,7 +284,7 @@ mod tests {
         #[test]
         fn prop_differential_sve_vs_scalar_utf8_all(input in ".*") {
             if std::arch::is_aarch64_feature_detected!("sve") {
-                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
                 let simd = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
 
                 prop_assert_eq!(scalar.lines, simd.lines, "SVE all: lines mismatch");
@@ -299,7 +299,7 @@ mod tests {
     proptest! {
         #[test]
         fn prop_differential_neon_vs_scalar_c_all(input in ".*") {
-            let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::C);
+            let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::C);
             let simd = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::C) };
 
             prop_assert_eq!(scalar.lines, simd.lines, "NEON C: lines mismatch");
@@ -313,13 +313,92 @@ mod tests {
         #[test]
         fn prop_differential_sve_vs_scalar_c_all(input in ".*") {
             if std::arch::is_aarch64_feature_detected!("sve") {
-                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::C);
+                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::C);
                 let simd = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::C) };
 
                 prop_assert_eq!(scalar.lines, simd.lines, "SVE C: lines mismatch");
                 prop_assert_eq!(scalar.words, simd.words, "SVE C: words mismatch");
                 prop_assert_eq!(scalar.bytes, simd.bytes, "SVE C: bytes mismatch");
                 prop_assert_eq!(scalar.chars, simd.chars, "SVE C: chars mismatch");
+            }
+        }
+    }
+
+    // ====================================================================
+    // Invalid UTF-8 Property Tests (SIMD)
+    // ====================================================================
+    use proptest::collection::vec as prop_vec;
+
+    // Property: Invalid UTF-8 → bytes >= chars (NEON)
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_bytes_ge_chars_neon(invalid_bytes in prop_vec(0u8..=255u8, 0..100)) {
+            let result = unsafe { crate::wc_arm64::count_text_neon(&invalid_bytes, LocaleEncoding::Utf8) };
+            prop_assert!(result.bytes >= result.chars,
+                "NEON Invalid UTF-8: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+        }
+    }
+
+    // Property: Invalid UTF-8 → bytes >= chars (SVE)
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_bytes_ge_chars_sve(invalid_bytes in prop_vec(0u8..=255u8, 0..100)) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(&invalid_bytes, LocaleEncoding::Utf8) };
+                prop_assert!(result.bytes >= result.chars,
+                    "SVE Invalid UTF-8: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+            }
+        }
+    }
+
+    // Property: Differential - Invalid UTF-8 (NEON == Scalar)
+    proptest! {
+        #[test]
+        fn prop_differential_neon_vs_scalar_invalid_utf8(invalid_bytes in prop_vec(0u8..=255u8, 0..100)) {
+            let scalar = crate::wc_default::word_count_scalar(&invalid_bytes, LocaleEncoding::Utf8);
+            let simd = unsafe { crate::wc_arm64::count_text_neon(&invalid_bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(scalar.lines, simd.lines, "NEON invalid UTF-8: lines mismatch");
+            prop_assert_eq!(scalar.words, simd.words, "NEON invalid UTF-8: words mismatch");
+            prop_assert_eq!(scalar.bytes, simd.bytes, "NEON invalid UTF-8: bytes mismatch");
+            prop_assert_eq!(scalar.chars, simd.chars, "NEON invalid UTF-8: chars mismatch");
+        }
+    }
+
+    // Property: Differential - Invalid UTF-8 (SVE == Scalar)
+    proptest! {
+        #[test]
+        fn prop_differential_sve_vs_scalar_invalid_utf8(invalid_bytes in prop_vec(0u8..=255u8, 0..100)) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let scalar = crate::wc_default::word_count_scalar(&invalid_bytes, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_arm64::count_text_sve(&invalid_bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "SVE invalid UTF-8: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "SVE invalid UTF-8: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "SVE invalid UTF-8: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "SVE invalid UTF-8: chars mismatch");
+            }
+        }
+    }
+
+    // Property: C locale with any bytes (NEON)
+    proptest! {
+        #[test]
+        fn prop_c_locale_any_bytes_neon(bytes in prop_vec(0u8..=255u8, 0..100)) {
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::C) };
+            prop_assert_eq!(result.chars, result.bytes,
+                "NEON C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+        }
+    }
+
+    // Property: C locale with any bytes (SVE)
+    proptest! {
+        #[test]
+        fn prop_c_locale_any_bytes_sve(bytes in prop_vec(0u8..=255u8, 0..100)) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::C) };
+                prop_assert_eq!(result.chars, result.bytes,
+                    "SVE C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
             }
         }
     }

@@ -357,6 +357,190 @@ pub mod tests {
     // Apply template to test scalar implementation
     #[apply(common_word_count_cases)]
     fn test_word_count_scalar(input: &str, locale: LocaleEncoding, expected: FileCounts) {
+        let result = word_count_scalar(input.as_bytes(), locale);
+        assert_eq!(result, expected);
+    }
+
+    // ====================================================================
+    // Invalid UTF-8 Test Cases (using raw bytes)
+    // ====================================================================
+
+    #[rstest]
+    // Lone continuation byte (10xxxxxx without start byte)
+    // GNU wc: isolated invalid bytes don't form words
+    #[case::invalid_lone_continuation(
+        &[0x80u8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 1)  // lines=0, words=0, chars=0, bytes=1
+    )]
+    // Truncated 2-byte sequence (110xxxxx without continuation)
+    // Treated as incomplete at end, not processed
+    #[case::invalid_truncated_2byte(
+        &[0xC2u8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 1)  // lines=0, words=0, chars=0, bytes=1
+    )]
+    // Truncated 3-byte sequence (1110xxxx + one continuation)
+    #[case::invalid_truncated_3byte(
+        &[0xE0u8, 0xA0u8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 2)  // lines=0, words=0, chars=0, bytes=2
+    )]
+    // Truncated 4-byte sequence (11110xxx + two continuations)
+    #[case::invalid_truncated_4byte(
+        &[0xF0u8, 0x90u8, 0x80u8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 3)  // lines=0, words=0, chars=0, bytes=3
+    )]
+    // Invalid byte in middle of ASCII word
+    #[case::invalid_in_word(
+        b"hello\xFFworld",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 10, 11)  // 1 word (joined), 10 chars (h,e,l,l,o,w,o,r,l,d), 11 bytes
+    )]
+    // Invalid bytes separated by space: isolated invalid bytes don't form words
+    #[case::invalid_separated_by_space(
+        &[0xFFu8, b' ', 0xFEu8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 1, 3)  // 0 words, 1 char (space), 3 bytes
+    )]
+    // Invalid byte at start
+    #[case::invalid_at_start(
+        b"\xFFhello",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 5, 6)  // 1 word, 5 chars (hello), 6 bytes
+    )]
+    // Invalid byte at end
+    #[case::invalid_at_end(
+        b"hello\xFF",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 5, 6)  // 1 word, 5 chars (hello), 6 bytes
+    )]
+    // Mixed valid UTF-8 and invalid bytes
+    #[case::mixed_valid_invalid(
+        b"caf\xC3\xA9\xFF\xFEtest",  // café with invalid bytes after
+        LocaleEncoding::Utf8,
+        counts(0, 1, 8, 11)  // 1 word, 8 chars (c,a,f,é,t,e,s,t), 11 bytes
+    )]
+    // C locale: invalid bytes ARE chars
+    #[case::invalid_c_locale(
+        &[0xFFu8, 0xFEu8, 0xFDu8][..],
+        LocaleEncoding::C,
+        counts(0, 1, 3, 3)  // C locale: all bytes are chars
+    )]
+    // Invalid byte then newline: isolated invalid byte doesn't form word
+    #[case::invalid_then_newline(
+        b"\xFF\n",
+        LocaleEncoding::Utf8,
+        counts(1, 0, 1, 2)  // 1 line, 0 words, 1 char (newline), 2 bytes
+    )]
+    // Multiple invalid bytes in sequence
+    #[case::multiple_invalid_consecutive(
+        &[0xFFu8, 0xFEu8, 0xFDu8, 0xFCu8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 4)  // 0 words (isolated invalid bytes), 0 chars, 4 bytes
+    )]
+    // Invalid bytes joining two words
+    #[case::invalid_joining_two_words(
+        b"hello\xFF\xFE\xFDworld",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 10, 13)  // 1 word (joined by invalid bytes), 10 chars, 13 bytes
+    )]
+    // Invalid byte after whitespace before word
+    #[case::space_invalid_word(
+        b" \xFFhello",
+        LocaleEncoding::Utf8,
+        counts(0, 1, 6, 7)  // 1 word (space + invalid + hello), 6 chars, 7 bytes
+    )]
+    // Word, invalid, space, word
+    #[case::word_invalid_space_word(
+        b"hello\xFF world",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 11, 12)  // 2 words, 11 chars, 12 bytes
+    )]
+    // Invalid start byte 0xF8-0xFF (invalid in UTF-8)
+    #[case::invalid_start_byte_f8(
+        &[0xF8u8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 1)
+    )]
+    // Wrong continuation byte pattern
+    #[case::wrong_continuation(
+        &[0xC2u8, 0xC2u8][..],  // Start byte followed by another start byte
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 2)
+    )]
+    // Valid 2-byte followed by invalid
+    #[case::valid_2byte_then_invalid(
+        b"\xC3\xA9\xFF",  // é followed by invalid
+        LocaleEncoding::Utf8,
+        counts(0, 1, 1, 3)  // 1 word (joined), 1 char (é), 3 bytes
+    )]
+    // Invalid in middle of multibyte char
+    #[case::invalid_breaks_multibyte(
+        b"test\xC3\xFF\xA9more",  // Broken é sequence
+        LocaleEncoding::Utf8,
+        counts(0, 1, 8, 11)  // 1 word (all joined), 8 chars (test+more), 11 bytes
+    )]
+    // SIMD boundary: 15 valid + invalid at position 16
+    #[case::invalid_at_16byte_boundary(
+        b"123456789012345\xFF",  // 15 ASCII + invalid at position 16
+        LocaleEncoding::Utf8,
+        counts(0, 1, 15, 16)  // 1 word, 15 chars, 16 bytes
+    )]
+    // SIMD boundary: 31 valid + invalid at position 32
+    #[case::invalid_at_32byte_boundary(
+        b"1234567890123456789012345678901\xFF",  // 31 ASCII + invalid
+        LocaleEncoding::Utf8,
+        counts(0, 1, 31, 32)  // 1 word, 31 chars, 32 bytes
+    )]
+    // SIMD boundary: 63 valid + invalid at position 64
+    #[case::invalid_at_64byte_boundary(
+        b"123456789012345678901234567890123456789012345678901234567890123\xFF",  // 63 ASCII + invalid
+        LocaleEncoding::Utf8,
+        counts(0, 1, 63, 64)  // 1 word, 63 chars, 64 bytes
+    )]
+    // Invalid across newlines
+    #[case::invalid_multiline(
+        b"line1\xFF\nline2\xFE\n",
+        LocaleEncoding::Utf8,
+        counts(2, 2, 12, 14)  // 2 lines, 2 words, 12 chars, 14 bytes
+    )]
+    // Mix of tabs, spaces, invalid
+    #[case::invalid_with_tabs(
+        b"word1\t\xFF\tword2",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 12, 13)  // 2 words, 12 chars (tabs count), 13 bytes
+    )]
+    // Overlong encoding (2-byte encoding of ASCII 'A' = 0xC1 0x81)
+    #[case::overlong_2byte_encoding(
+        &[0xC1u8, 0x81u8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 2)  // Invalid encoding, 0 chars
+    )]
+    // Surrogate half (0xED 0xA0 0x80) - invalid in UTF-8
+    #[case::surrogate_half(
+        &[0xEDu8, 0xA0u8, 0x80u8][..],
+        LocaleEncoding::Utf8,
+        counts(0, 0, 0, 3)  // Invalid surrogate
+    )]
+    // Valid emoji followed by invalid
+    #[case::emoji_then_invalid(
+        b"\xF0\x9F\x98\x80\xFF",  // 😀 followed by invalid
+        LocaleEncoding::Utf8,
+        counts(0, 1, 1, 5)  // 1 word (joined), 1 char (emoji), 5 bytes
+    )]
+    // Multiple words with invalid bytes between
+    #[case::multiple_words_invalid_between(
+        b"one\xFF two\xFE three",
+        LocaleEncoding::Utf8,
+        counts(0, 3, 13, 15)  // 3 words, 13 chars, 15 bytes
+    )]
+    fn test_word_count_scalar_invalid_utf8(
+        #[case] input: &[u8],
+        #[case] locale: LocaleEncoding,
+        #[case] expected: FileCounts,
+    ) {
         let result = word_count_scalar(input, locale);
         assert_eq!(result, expected);
     }
@@ -370,7 +554,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_bytes_equals_input_length_scalar(input in "\\PC*") {
-            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             prop_assert_eq!(result.bytes, input.len(),
                 "bytes should match input length");
         }
@@ -380,7 +564,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_bytes_ge_chars_ge_lines_scalar(input in "\\PC*") {
-            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             prop_assert!(result.bytes >= result.chars,
                 "bytes ({}) must be >= chars ({})", result.bytes, result.chars);
             prop_assert!(result.chars >= result.lines,
@@ -392,7 +576,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_c_locale_lines_le_chars_eq_bytes_scalar(input in "\\PC*") {
-            let result = word_count_scalar(&input, LocaleEncoding::C);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::C);
             prop_assert_eq!(result.chars, result.bytes,
                 "C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
             prop_assert!(result.lines <= result.chars,
@@ -404,7 +588,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_lines_zero_no_newlines_scalar(input in "\\PC*") {
-            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             prop_assert_eq!(result.lines, 0,
                 "no newlines: lines must be 0, got {}", result.lines);
         }
@@ -414,7 +598,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_lines_count_accurate_scalar(input in ".*") {
-            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             let expected_lines = input.chars().filter(|&c| c == '\n').count();
             prop_assert_eq!(result.lines, expected_lines,
                 "lines ({}) must equal newline count ({})", result.lines, expected_lines);
@@ -425,7 +609,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_ascii_bytes_eq_chars_scalar(input in "[\\x00-\\x7F]*") {
-            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             prop_assert_eq!(result.bytes, result.chars,
                 "ASCII: bytes ({}) must equal chars ({})", result.bytes, result.chars);
         }
@@ -435,7 +619,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_whitespace_zero_words_scalar(input in "\\s*") {
-            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
             prop_assert_eq!(result.words, 0,
                 "all whitespace: words must be 0, got {}", result.words);
             prop_assert_eq!(result.bytes, input.len(),
@@ -445,6 +629,324 @@ pub mod tests {
             let expected_lines = input.chars().filter(|&c| c == '\n').count();
             prop_assert_eq!(result.lines, expected_lines,
                 "all whitespace: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+        }
+    }
+
+    // ====================================================================
+    // Property-Based Tests for Invalid UTF-8
+    // ====================================================================
+    use proptest::collection::vec as prop_vec;
+
+    // Property 7: Invalid UTF-8 → bytes >= chars (invalid bytes don't count as chars)
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_bytes_ge_chars_scalar(invalid_bytes in prop_vec(0u8..=255u8, 0..100)) {
+            let result = word_count_scalar(&invalid_bytes, LocaleEncoding::Utf8);
+            prop_assert!(result.bytes >= result.chars,
+                "Invalid UTF-8: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+        }
+    }
+
+    // Property 8: C locale with any bytes → chars == bytes (every byte is a char)
+    proptest! {
+        #[test]
+        fn prop_c_locale_any_bytes_chars_eq_bytes_scalar(bytes in prop_vec(0u8..=255u8, 0..100)) {
+            let result = word_count_scalar(&bytes, LocaleEncoding::C);
+            prop_assert_eq!(result.chars, result.bytes,
+                "C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+        }
+    }
+
+    // Property 9: Invalid UTF-8 bytes are non-whitespace (join words)
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_joins_words_scalar(
+            prefix in "[a-z]+",
+            invalid_byte in 0x80u8..=0xFFu8,  // Invalid UTF-8 start bytes
+            suffix in "[a-z]+"
+        ) {
+            // Create: "prefix<invalid_byte>suffix" - invalid byte should NOT split words
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(prefix.as_bytes());
+            bytes.push(invalid_byte);
+            bytes.extend_from_slice(suffix.as_bytes());
+
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Invalid byte joins words (treated as non-whitespace)
+            prop_assert_eq!(result.words, 1,
+                "Invalid UTF-8 byte 0x{:02X} should join words, got {} words", invalid_byte, result.words);
+
+            // Verify chars count: prefix.len() + suffix.len() (invalid byte NOT counted)
+            let expected_chars = prefix.chars().count() + suffix.chars().count();
+            prop_assert_eq!(result.chars, expected_chars,
+                "Invalid UTF-8: chars should be {} (prefix + suffix), got {}", expected_chars, result.chars);
+
+            // Verify bytes count: includes the invalid byte
+            prop_assert_eq!(result.bytes, bytes.len(),
+                "Invalid UTF-8: bytes should be {}, got {}", bytes.len(), result.bytes);
+        }
+    }
+
+    // Property 10: Lone continuation bytes (0x80-0xBF) don't form words when isolated
+    proptest! {
+        #[test]
+        fn prop_lone_continuation_bytes_scalar(
+            continuation_byte in 0x80u8..=0xBFu8,
+            count in 1usize..10
+        ) {
+            let bytes = vec![continuation_byte; count];
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Isolated continuation bytes: 0 words, 0 chars, N bytes
+            prop_assert_eq!(result.words, 0,
+                "Lone continuation bytes should not form words, got {}", result.words);
+            prop_assert_eq!(result.chars, 0,
+                "Lone continuation bytes should not count as chars, got {}", result.chars);
+            prop_assert_eq!(result.bytes, count,
+                "Bytes count should be {}, got {}", count, result.bytes);
+        }
+    }
+
+    // Property 11: Truncated UTF-8 sequences at end
+    proptest! {
+        #[test]
+        fn prop_truncated_sequences_at_end_scalar(
+            prefix in "[a-z]{0,20}",
+            start_byte in prop::sample::select(vec![
+                0xC2u8, 0xC3u8,  // 2-byte starts
+                0xE0u8, 0xE1u8,  // 3-byte starts
+                0xF0u8, 0xF1u8,  // 4-byte starts
+            ])
+        ) {
+            // Create input with truncated sequence at end
+            let mut bytes = Vec::from(prefix.as_bytes());
+            bytes.push(start_byte);
+
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Truncated at end: not processed, but bytes still counted
+            prop_assert_eq!(result.bytes, bytes.len(),
+                "Bytes should be {}, got {}", bytes.len(), result.bytes);
+
+            // Chars should only count the valid prefix
+            let expected_chars = prefix.chars().count();
+            prop_assert_eq!(result.chars, expected_chars,
+                "Chars should be {} (prefix only), got {}", expected_chars, result.chars);
+        }
+    }
+
+    // Property 12: Invalid bytes don't increment line count (only \n does)
+    proptest! {
+        #[test]
+        fn prop_invalid_bytes_no_lines_scalar(
+            invalid_bytes in prop_vec(0x80u8..=0xFFu8, 1..50)
+        ) {
+            let result = word_count_scalar(&invalid_bytes, LocaleEncoding::Utf8);
+
+            // No newlines in invalid bytes → 0 lines
+            prop_assert_eq!(result.lines, 0,
+                "Invalid bytes without \\n should have 0 lines, got {}", result.lines);
+        }
+    }
+
+    // Property 13: Mix of valid ASCII and invalid bytes
+    proptest! {
+        #[test]
+        fn prop_mixed_ascii_invalid_scalar(
+            valid in "[a-z]{1,20}",
+            invalid_count in 1usize..5
+        ) {
+            let mut bytes = Vec::from(valid.as_bytes());
+            // Append invalid bytes
+            for _ in 0..invalid_count {
+                bytes.push(0xFF);
+            }
+
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Should form 1 word (invalid bytes join with valid)
+            prop_assert_eq!(result.words, 1,
+                "Valid + invalid should form 1 word, got {}", result.words);
+
+            // Chars = only valid ASCII chars
+            prop_assert_eq!(result.chars, valid.len(),
+                "Chars should be {} (valid only), got {}", valid.len(), result.chars);
+
+            // Bytes = all bytes
+            prop_assert_eq!(result.bytes, valid.len() + invalid_count,
+                "Bytes should be {}, got {}", valid.len() + invalid_count, result.bytes);
+        }
+    }
+
+    // Property 14: Invalid bytes preserve newline counting
+    proptest! {
+        #[test]
+        fn prop_invalid_with_newlines_scalar(
+            lines in prop_vec("[a-z]{0,10}", 1..10)
+        ) {
+            // Build input: line1\xFF\nline2\xFF\n...
+            let mut bytes = Vec::new();
+            for (i, line) in lines.iter().enumerate() {
+                bytes.extend_from_slice(line.as_bytes());
+                bytes.push(0xFF);  // Invalid byte
+                if i < lines.len() - 1 {
+                    bytes.push(b'\n');
+                }
+            }
+
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Line count = number of \n bytes
+            let expected_lines = lines.len() - 1;
+            prop_assert_eq!(result.lines, expected_lines,
+                "Lines should be {}, got {}", expected_lines, result.lines);
+
+            // Chars = only valid chars (ASCII letters + newlines)
+            let total_ascii: usize = lines.iter().map(|s| s.len()).sum();
+            let expected_chars = total_ascii + expected_lines;  // letters + newlines
+            prop_assert_eq!(result.chars, expected_chars,
+                "Chars should be {}, got {}", expected_chars, result.chars);
+        }
+    }
+
+    // Property 15: Invalid start bytes 0xF5-0xFF (always invalid in UTF-8)
+    proptest! {
+        #[test]
+        fn prop_high_invalid_start_bytes_scalar(
+            invalid_byte in 0xF5u8..=0xFFu8,
+            count in 1usize..10
+        ) {
+            let bytes = vec![invalid_byte; count];
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // These bytes are never valid UTF-8 start bytes
+            prop_assert_eq!(result.chars, 0,
+                "High invalid bytes should not count as chars, got {}", result.chars);
+            prop_assert_eq!(result.words, 0,
+                "Isolated invalid bytes should not form words, got {}", result.words);
+            prop_assert_eq!(result.bytes, count,
+                "Bytes should be {}, got {}", count, result.bytes);
+        }
+    }
+
+    // Property 16: Overlong encodings are invalid
+    proptest! {
+        #[test]
+        fn prop_overlong_encodings_invalid_scalar(
+            ascii_char in 0x00u8..=0x7Fu8
+        ) {
+            // Create 2-byte overlong encoding of ASCII char
+            // Valid ASCII: 0xxxxxxx
+            // Overlong: 110000xx 10xxxxxx
+            let overlong = vec![
+                0xC0 | (ascii_char >> 6),
+                0x80 | (ascii_char & 0x3F),
+            ];
+
+            let result = word_count_scalar(&overlong, LocaleEncoding::Utf8);
+
+            // Overlong encoding is invalid
+            prop_assert_eq!(result.chars, 0,
+                "Overlong encoding should not count as char, got {}", result.chars);
+            prop_assert_eq!(result.bytes, 2,
+                "Bytes should be 2, got {}", result.bytes);
+        }
+    }
+
+    // Property 17: Random byte sequences - bytes always >= chars
+    proptest! {
+        #[test]
+        fn prop_random_bytes_invariant_scalar(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Fundamental invariant: bytes >= chars for any input
+            prop_assert!(result.bytes >= result.chars,
+                "bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+
+            // bytes count must match input length
+            prop_assert_eq!(result.bytes, bytes.len(),
+                "bytes must equal input length: {} != {}", result.bytes, bytes.len());
+
+            // lines <= chars (newlines are chars in UTF-8)
+            prop_assert!(result.lines <= result.chars,
+                "lines ({}) must be <= chars ({})", result.lines, result.chars);
+        }
+    }
+
+    // Property 18: Invalid bytes at SIMD boundaries (16, 32, 64)
+    proptest! {
+        #[test]
+        fn prop_invalid_at_simd_boundaries_scalar(
+            boundary_size in prop::sample::select(vec![16usize, 32, 64]),
+            invalid_byte in 0x80u8..=0xFFu8
+        ) {
+            // Create: N-1 ASCII chars + 1 invalid byte at boundary
+            let mut bytes = vec![b'a'; boundary_size - 1];
+            bytes.push(invalid_byte);
+
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Should form 1 word
+            prop_assert_eq!(result.words, 1,
+                "Should form 1 word at boundary {}, got {}", boundary_size, result.words);
+
+            // Chars = boundary_size - 1 (all except invalid)
+            prop_assert_eq!(result.chars, boundary_size - 1,
+                "Chars should be {}, got {}", boundary_size - 1, result.chars);
+
+            // Bytes = boundary_size
+            prop_assert_eq!(result.bytes, boundary_size,
+                "Bytes should be {}, got {}", boundary_size, result.bytes);
+        }
+    }
+
+    // Property 19: Multiple invalid bytes between words
+    proptest! {
+        #[test]
+        fn prop_multiple_invalid_between_words_scalar(
+            word1 in "[a-z]{1,10}",
+            word2 in "[a-z]{1,10}",
+            invalid_count in 1usize..10
+        ) {
+            let mut bytes = Vec::from(word1.as_bytes());
+            // Add multiple invalid bytes
+            for _ in 0..invalid_count {
+                bytes.push(0xFF);
+            }
+            bytes.extend_from_slice(word2.as_bytes());
+
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            // Invalid bytes join the words → 1 word
+            prop_assert_eq!(result.words, 1,
+                "Multiple invalid bytes should join words, got {}", result.words);
+
+            // Chars = word1 + word2 (no invalid bytes)
+            let expected_chars = word1.len() + word2.len();
+            prop_assert_eq!(result.chars, expected_chars,
+                "Chars should be {}, got {}", expected_chars, result.chars);
+        }
+    }
+
+    // Property 20: C locale treats all bytes as chars, even invalid UTF-8
+    proptest! {
+        #[test]
+        fn prop_c_locale_comprehensive_scalar(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            let result = word_count_scalar(&bytes, LocaleEncoding::C);
+
+            // C locale: every byte is a char
+            prop_assert_eq!(result.chars, result.bytes,
+                "C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+
+            // Line count = count of \n bytes
+            let expected_lines = bytes.iter().filter(|&&b| b == b'\n').count();
+            prop_assert_eq!(result.lines, expected_lines,
+                "C locale: lines ({}) must equal \\n count ({})", result.lines, expected_lines);
         }
     }
 }
