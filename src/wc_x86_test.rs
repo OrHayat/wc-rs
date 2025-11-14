@@ -272,4 +272,59 @@ mod tests {
             }
         }
     }
+
+    // Property 6: All whitespace → words == 0 (and verify other counts)
+    proptest! {
+        #[test]
+        fn prop_whitespace_zero_words_sse2(input in "\\s*") {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.words, 0,
+                    "SSE2 all whitespace: words must be 0, got {}", result.words);
+                prop_assert_eq!(result.bytes, input.len(),
+                    "SSE2 all whitespace: bytes ({}) must equal input length ({})", result.bytes, input.len());
+                prop_assert_eq!(result.chars, input.chars().count(),
+                    "SSE2 all whitespace: chars ({}) must equal char count ({})", result.chars, input.chars().count());
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SSE2 all whitespace: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_whitespace_zero_words_avx2(input in "\\s*") {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.words, 0,
+                    "AVX2 all whitespace: words must be 0, got {}", result.words);
+                prop_assert_eq!(result.bytes, input.len(),
+                    "AVX2 all whitespace: bytes ({}) must equal input length ({})", result.bytes, input.len());
+                prop_assert_eq!(result.chars, input.chars().count(),
+                    "AVX2 all whitespace: chars ({}) must equal char count ({})", result.chars, input.chars().count());
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX2 all whitespace: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_whitespace_zero_words_avx512(input in "\\s*") {
+            if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
+                let result = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.words, 0,
+                    "AVX512 all whitespace: words must be 0, got {}", result.words);
+                prop_assert_eq!(result.bytes, input.len(),
+                    "AVX512 all whitespace: bytes ({}) must equal input length ({})", result.bytes, input.len());
+                prop_assert_eq!(result.chars, input.chars().count(),
+                    "AVX512 all whitespace: chars ({}) must equal char count ({})", result.chars, input.chars().count());
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX512 all whitespace: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
 }

@@ -429,4 +429,21 @@ pub mod tests {
                 "ASCII: bytes ({}) must equal chars ({})", result.bytes, result.chars);
         }
     }
+
+    // Property 6: All whitespace → words == 0 (and verify other counts)
+    proptest! {
+        #[test]
+        fn prop_whitespace_zero_words_scalar(input in "\\s*") {
+            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            prop_assert_eq!(result.words, 0,
+                "all whitespace: words must be 0, got {}", result.words);
+            prop_assert_eq!(result.bytes, input.len(),
+                "all whitespace: bytes ({}) must equal input length ({})", result.bytes, input.len());
+            prop_assert_eq!(result.chars, input.chars().count(),
+                "all whitespace: chars ({}) must equal char count ({})", result.chars, input.chars().count());
+            let expected_lines = input.chars().filter(|&c| c == '\n').count();
+            prop_assert_eq!(result.lines, expected_lines,
+                "all whitespace: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+        }
+    }
 }

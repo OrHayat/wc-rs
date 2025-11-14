@@ -172,4 +172,39 @@ mod tests {
             }
         }
     }
+
+    // Property 6: All whitespace → words == 0 (and verify other counts)
+    proptest! {
+        #[test]
+        fn prop_whitespace_zero_words_neon(input in "\\s*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+            prop_assert_eq!(result.words, 0,
+                "NEON all whitespace: words must be 0, got {}", result.words);
+            prop_assert_eq!(result.bytes, input.len(),
+                "NEON all whitespace: bytes ({}) must equal input length ({})", result.bytes, input.len());
+            prop_assert_eq!(result.chars, input.chars().count(),
+                "NEON all whitespace: chars ({}) must equal char count ({})", result.chars, input.chars().count());
+            let expected_lines = input.chars().filter(|&c| c == '\n').count();
+            prop_assert_eq!(result.lines, expected_lines,
+                "NEON all whitespace: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_whitespace_zero_words_sve(input in "\\s*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.words, 0,
+                    "SVE all whitespace: words must be 0, got {}", result.words);
+                prop_assert_eq!(result.bytes, input.len(),
+                    "SVE all whitespace: bytes ({}) must equal input length ({})", result.bytes, input.len());
+                prop_assert_eq!(result.chars, input.chars().count(),
+                    "SVE all whitespace: chars ({}) must equal char count ({})", result.chars, input.chars().count());
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SVE all whitespace: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
 }
