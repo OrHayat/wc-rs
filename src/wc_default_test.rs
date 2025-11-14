@@ -81,6 +81,8 @@ pub mod tests {
     #[case::single_newline("\n", LocaleEncoding::Utf8, counts(1, 0, 1, 1))]
     #[case::multiple_newlines("\n\n\n", LocaleEncoding::Utf8, counts(3, 0, 3, 3))]
     #[case::spaces_and_newlines("  \n  \n", LocaleEncoding::Utf8, counts(2, 0, 6, 6))]
+    // Single character cases
+    #[case::single_ascii_char("a", LocaleEncoding::Utf8, counts(0, 1, 1, 1))]
     // Single word cases
     #[case::single_word("hello", LocaleEncoding::Utf8, counts(0, 1, 5, 5))]
     #[case::single_word_with_newline("hello\n", LocaleEncoding::Utf8, counts(1, 1, 6, 6))]
