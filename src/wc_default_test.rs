@@ -536,6 +536,18 @@ pub mod tests {
         LocaleEncoding::Utf8,
         counts(0, 3, 13, 15)  // 3 words, 13 chars, 15 bytes
     )]
+    // Invalid byte followed by valid multi-byte UTF-8
+    #[case::invalid_then_valid_multibyte(
+        b"\xFF\xC3\xA9",  // 0xFF (invalid) then é (valid 2-byte UTF-8)
+        LocaleEncoding::Utf8,
+        counts(0, 1, 1, 3)  // 1 word (joined by invalid), 1 char (é), 3 bytes
+    )]
+    // Multiple invalid bytes with newlines
+    #[case::invalid_with_multiple_newlines(
+        b"\xFF\n\xFF\n\xFF\n",  // Invalid bytes separated by newlines
+        LocaleEncoding::Utf8,
+        counts(3, 0, 3, 6)  // 3 lines, 0 words, 3 chars (newlines are valid ASCII), 6 bytes
+    )]
     fn test_word_count_scalar_invalid_utf8(
         #[case] input: &[u8],
         #[case] locale: LocaleEncoding,
