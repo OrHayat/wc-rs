@@ -115,12 +115,32 @@ fn process_stdin(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
 }
 
 fn process_files(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
+    let mut total = FileCounts {
+        lines: 0,
+        words: 0,
+        bytes: 0,
+        chars: 0,
+    };
+
     for file_path in &args.files {
         let content = std::fs::read(file_path)
             .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
         let stats = count_text(&content, locale);
+
+        // Accumulate totals
+        total.lines += stats.lines;
+        total.words += stats.words;
+        total.bytes += stats.bytes;
+        total.chars += stats.chars;
+
         print_stats(&stats, args, Some(file_path));
     }
+
+    // Print total line if multiple files
+    if args.files.len() > 1 {
+        print_total(&total, args);
+    }
+
     Ok(())
 }
 
@@ -142,6 +162,22 @@ fn print_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&Path
         Some(path) => println!("{}", path.display()),
         None => println!(),
     }
+}
+
+fn print_total(stats: &FileCounts, args: &WordCountArgs) {
+    if args.lines {
+        print!("{}\t", stats.lines);
+    }
+    if args.words {
+        print!("{}\t", stats.words);
+    }
+    if args.chars {
+        print!("{}\t", stats.chars);
+    }
+    if args.bytes {
+        print!("{}\t", stats.bytes);
+    }
+    println!("total");
 }
 
 fn read_stdin() -> Result<Vec<u8>> {
