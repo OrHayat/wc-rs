@@ -1,5 +1,3 @@
-use std::intrinsics::simd::simd_relaxed_fma;
-
 use crate::{FileCounts, LocaleEncoding};
 
 /// Result from scalar word counting with incomplete UTF-8 sequence tracking

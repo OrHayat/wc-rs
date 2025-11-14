@@ -254,7 +254,7 @@ pub(crate) unsafe fn count_text_neon(content: &[u8], locale: LocaleEncoding) -> 
     let mut seen_space = true;
 
     // UTF-8 carry buffer: incomplete multi-byte sequences at chunk boundaries
-    let mut carry: Vec<u8> = Vec::with_capacity(3);
+    let mut carry: Vec<u8> = Vec::with_capacity(4);
 
     for chunk in chunks.by_ref() {
         let chunk_vec = unsafe { vld1q_u8(chunk.as_ptr()) };
