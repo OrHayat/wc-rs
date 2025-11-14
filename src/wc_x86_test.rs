@@ -327,4 +327,50 @@ mod tests {
             }
         }
     }
+
+    // Property 7: Differential Testing - SIMD == Scalar (ASCII inputs, UTF-8 locale)
+    proptest! {
+        #[test]
+        fn prop_differential_sse2_vs_scalar_utf8_ascii(input in "[\\x00-\\x7F]*") {
+            if is_x86_feature_detected!("sse2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "SSE2: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "SSE2: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "SSE2: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "SSE2: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx2_vs_scalar_utf8_ascii(input in "[\\x00-\\x7F]*") {
+            if is_x86_feature_detected!("avx2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX2: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX2: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX2: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX2: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx512_vs_scalar_utf8_ascii(input in "[\\x00-\\x7F]*") {
+            if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX512: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX512: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX512: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX512: chars mismatch");
+            }
+        }
+    }
 }

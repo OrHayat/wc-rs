@@ -207,4 +207,33 @@ mod tests {
             }
         }
     }
+
+    // Property 7: Differential Testing - SIMD == Scalar (ASCII inputs, UTF-8 locale)
+    proptest! {
+        #[test]
+        fn prop_differential_neon_vs_scalar_utf8_ascii(input in "[\\x00-\\x7F]*") {
+            let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+            let simd = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(scalar.lines, simd.lines, "NEON: lines mismatch");
+            prop_assert_eq!(scalar.words, simd.words, "NEON: words mismatch");
+            prop_assert_eq!(scalar.bytes, simd.bytes, "NEON: bytes mismatch");
+            prop_assert_eq!(scalar.chars, simd.chars, "NEON: chars mismatch");
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_sve_vs_scalar_utf8_ascii(input in "[\\x00-\\x7F]*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "SVE: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "SVE: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "SVE: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "SVE: chars mismatch");
+            }
+        }
+    }
 }
