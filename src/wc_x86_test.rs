@@ -373,4 +373,50 @@ mod tests {
             }
         }
     }
+
+    // Property 7b: Differential Testing - SIMD == Scalar (Printable Unicode, UTF-8 locale)
+    proptest! {
+        #[test]
+        fn prop_differential_sse2_vs_scalar_utf8_unicode(input in "\\PC*") {
+            if is_x86_feature_detected!("sse2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "SSE2 Unicode: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "SSE2 Unicode: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "SSE2 Unicode: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "SSE2 Unicode: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx2_vs_scalar_utf8_unicode(input in "\\PC*") {
+            if is_x86_feature_detected!("avx2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX2 Unicode: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX2 Unicode: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX2 Unicode: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX2 Unicode: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx512_vs_scalar_utf8_unicode(input in "\\PC*") {
+            if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX512 Unicode: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX512 Unicode: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX512 Unicode: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX512 Unicode: chars mismatch");
+            }
+        }
+    }
 }
