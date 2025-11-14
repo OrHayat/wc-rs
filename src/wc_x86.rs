@@ -18,7 +18,7 @@ pub fn count_text_simd(content: &str, locale: LocaleEncoding) -> Option<FileCoun
     // Note: We only check for AVX512BW (not AVX512F) as BW is required for efficient byte operations
 
     if is_x86_feature_detected!("avx512bw") {
-        return Some(unsafe { count_text_avx512bw(content.as_bytes(), locale) });
+        return Some(unsafe { count_text_avx512(content.as_bytes(), locale) });
     }
 
     if is_x86_feature_detected!("avx2") {
@@ -435,11 +435,11 @@ define_simd_text_counter!(
 
 // Generate AVX512BW implementation using the macro
 define_simd_text_counter!(
-    fn_name: count_text_avx512bw,
+    fn_name: count_text_avx512,
     vec_type: __m512i,
     chunk_size: 64,
     mask_type: u64,
-    target_feature: "avx512bw",
+    target_feature: "avx512bw,avx512f",
     load_fn: _mm512_loadu_si512,
     count_newlines_fn: avx512_count_newlines,
     has_non_ascii_fn: avx512_has_non_ascii,

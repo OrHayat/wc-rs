@@ -419,4 +419,14 @@ pub mod tests {
                 "lines ({}) must equal newline count ({})", result.lines, expected_lines);
         }
     }
+
+    // Property 5: ASCII fast path - all bytes < 0x80 means bytes == chars
+    proptest! {
+        #[test]
+        fn prop_ascii_bytes_eq_chars_scalar(input in "[\\x00-\\x7F]*") {
+            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            prop_assert_eq!(result.bytes, result.chars,
+                "ASCII: bytes ({}) must equal chars ({})", result.bytes, result.chars);
+        }
+    }
 }

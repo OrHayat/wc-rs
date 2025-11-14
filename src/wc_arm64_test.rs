@@ -151,4 +151,25 @@ mod tests {
             }
         }
     }
+
+    // Property 5: ASCII fast path - all bytes < 0x80 means bytes == chars
+    proptest! {
+        #[test]
+        fn prop_ascii_bytes_eq_chars_neon(input in "[\\x00-\\x7F]*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+            prop_assert_eq!(result.bytes, result.chars,
+                "NEON ASCII: bytes ({}) must equal chars ({})", result.bytes, result.chars);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_ascii_bytes_eq_chars_sve(input in "[\\x00-\\x7F]*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, result.chars,
+                    "SVE ASCII: bytes ({}) must equal chars ({})", result.bytes, result.chars);
+            }
+        }
+    }
 }
