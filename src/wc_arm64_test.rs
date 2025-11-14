@@ -107,4 +107,48 @@ mod tests {
             }
         }
     }
+
+    // Property 4a: Line counting accuracy - no newlines
+    proptest! {
+        #[test]
+        fn prop_lines_zero_no_newlines_neon(input in "\\PC*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+            prop_assert_eq!(result.lines, 0,
+                "NEON no newlines: lines must be 0, got {}", result.lines);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lines_zero_no_newlines_sve(input in "\\PC*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.lines, 0,
+                    "SVE no newlines: lines must be 0, got {}", result.lines);
+            }
+        }
+    }
+
+    // Property 4b: Line counting accuracy - with newlines
+    proptest! {
+        #[test]
+        fn prop_lines_count_accurate_neon(input in ".*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+            let expected_lines = input.chars().filter(|&c| c == '\n').count();
+            prop_assert_eq!(result.lines, expected_lines,
+                "NEON: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lines_count_accurate_sve(input in ".*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SVE: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
 }

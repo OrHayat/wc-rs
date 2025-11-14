@@ -168,4 +168,75 @@ mod tests {
             }
         }
     }
+
+    // Property 4a: Line counting accuracy - no newlines
+    proptest! {
+        #[test]
+        fn prop_lines_zero_no_newlines_sse2(input in "\\PC*") {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.lines, 0,
+                    "SSE2 no newlines: lines must be 0, got {}", result.lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lines_zero_no_newlines_avx2(input in "\\PC*") {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.lines, 0,
+                    "AVX2 no newlines: lines must be 0, got {}", result.lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lines_zero_no_newlines_avx512(input in "\\PC*") {
+            if is_x86_feature_detected!("avx512bw") {
+                let result = unsafe { crate::wc_x86::count_text_avx512bw(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.lines, 0,
+                    "AVX512BW no newlines: lines must be 0, got {}", result.lines);
+            }
+        }
+    }
+
+    // Property 4b: Line counting accuracy - with newlines
+    proptest! {
+        #[test]
+        fn prop_lines_count_accurate_sse2(input in ".*") {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SSE2: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lines_count_accurate_avx2(input in ".*") {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX2: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lines_count_accurate_avx512(input in ".*") {
+            if is_x86_feature_detected!("avx512bw") {
+                let result = unsafe { crate::wc_x86::count_text_avx512bw(input.as_bytes(), LocaleEncoding::Utf8) };
+                let expected_lines = input.chars().filter(|&c| c == '\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX512BW: lines ({}) must equal newline count ({})", result.lines, expected_lines);
+            }
+        }
+    }
 }

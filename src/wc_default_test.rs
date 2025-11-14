@@ -398,4 +398,25 @@ pub mod tests {
                 "C locale: lines ({}) must be <= chars ({})", result.lines, result.chars);
         }
     }
+
+    // Property 4a: Line counting accuracy - no newlines (printable chars only)
+    proptest! {
+        #[test]
+        fn prop_lines_zero_no_newlines_scalar(input in "\\PC*") {
+            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            prop_assert_eq!(result.lines, 0,
+                "no newlines: lines must be 0, got {}", result.lines);
+        }
+    }
+
+    // Property 4b: Line counting accuracy - with newlines
+    proptest! {
+        #[test]
+        fn prop_lines_count_accurate_scalar(input in ".*") {
+            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            let expected_lines = input.chars().filter(|&c| c == '\n').count();
+            prop_assert_eq!(result.lines, expected_lines,
+                "lines ({}) must equal newline count ({})", result.lines, expected_lines);
+        }
+    }
 }
