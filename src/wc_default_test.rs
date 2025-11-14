@@ -334,14 +334,14 @@ pub mod tests {
     #[case::word_ending_at_exact_16("12345678901234 w", LocaleEncoding::Utf8, counts(0, 2, 16, 16))]
     // PropTest regression: AVX2 has_non_ascii bug (missing negative byte check for 0x80-0xFF)
     // 4-byte UTF-8 char split across 32-byte AVX2 boundary (byte 29-32: f0 90 a3 a0)
-    #[case::proptest_avx2_regression_complex_unicode(
+    #[case::avx2_regression_complex_unicode(
         "A ࠰®0᥀ 𑊟᰻0🪀¡0®𐣠A",
         LocaleEncoding::Utf8,
         counts(0, 3, 16, 34)
     )]
     // PropTest regression: AVX512 has_non_ascii bug (same issue as AVX2)
     // Complex Unicode with various multi-byte characters
-    #[case::proptest_avx512_regression_complex_unicode(
+    #[case::avx512_regression_complex_unicode(
         "a \u{c55}𐀼\u{cbc}a𐖌aa🉠𞹟🠀a𝼀® ฿ጒ a🌀 ®   𞅎\u{1e01b}𐨕",
         LocaleEncoding::Utf8,
         counts(0, 6, 29, 69)
@@ -384,6 +384,18 @@ pub mod tests {
                 "bytes ({}) must be >= chars ({})", result.bytes, result.chars);
             prop_assert!(result.chars >= result.lines,
                 "chars ({}) must be >= lines ({})", result.chars, result.lines);
+        }
+    }
+
+    // Property 3: C locale - lines <= chars == bytes (every byte is a char)
+    proptest! {
+        #[test]
+        fn prop_c_locale_lines_le_chars_eq_bytes_scalar(input in "\\PC*") {
+            let result = word_count_scalar(&input, LocaleEncoding::C);
+            prop_assert_eq!(result.chars, result.bytes,
+                "C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+            prop_assert!(result.lines <= result.chars,
+                "C locale: lines ({}) must be <= chars ({})", result.lines, result.chars);
         }
     }
 }

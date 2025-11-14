@@ -2,14 +2,13 @@
 #[cfg(target_arch = "aarch64")]
 mod tests {
     use crate::wc_default_test::tests::common_word_count_cases;
+    use crate::wc_default_test::tests::counts;
     use crate::{FileCounts, LocaleEncoding};
     use pretty_assertions::assert_eq;
+    use proptest::prelude::*;
     use rstest::rstest;
     use rstest_reuse;
     use rstest_reuse::*;
-
-    // Re-export counts helper for template expansion
-    use crate::wc_default_test::tests::counts;
 
     // Apply the common template to test NEON implementation
     // This will run all common test cases with the NEON implementation directly (not SVE!)
@@ -38,10 +37,8 @@ mod tests {
     // ====================================================================
     // Property-Based Tests (PropTest)
     // ====================================================================
-    use proptest::prelude::*;
 
     // Property: bytes == input length (ARM64 NEON)
-    #[cfg(target_arch = "aarch64")]
     proptest! {
         #[test]
         fn prop_bytes_equals_input_length_neon(input in "\\PC*") {
@@ -51,7 +48,6 @@ mod tests {
     }
 
     // Property: bytes == input length (ARM64 SVE)
-    #[cfg(target_arch = "aarch64")]
     proptest! {
         #[test]
         fn prop_bytes_equals_input_length_sve(input in "\\PC*") {
@@ -63,7 +59,6 @@ mod tests {
     }
 
     // Property 2: bytes >= chars >= lines
-    #[cfg(target_arch = "aarch64")]
     proptest! {
         #[test]
         fn prop_bytes_ge_chars_ge_lines_neon(input in "\\PC*") {
@@ -75,7 +70,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
     proptest! {
         #[test]
         fn prop_bytes_ge_chars_ge_lines_sve(input in "\\PC*") {
@@ -85,6 +79,31 @@ mod tests {
                     "SVE: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
                 prop_assert!(result.chars >= result.lines,
                     "SVE: chars ({}) must be >= lines ({})", result.chars, result.lines);
+            }
+        }
+    }
+
+    // Property 3: C locale - lines <= chars == bytes (every byte is a char)
+    proptest! {
+        #[test]
+        fn prop_c_locale_lines_le_chars_eq_bytes_neon(input in "\\PC*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::C) };
+            prop_assert_eq!(result.chars, result.bytes,
+                "NEON C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+            prop_assert!(result.lines <= result.chars,
+                "NEON C locale: lines ({}) must be <= chars ({})", result.lines, result.chars);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_c_locale_lines_le_chars_eq_bytes_sve(input in "\\PC*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::C) };
+                prop_assert_eq!(result.chars, result.bytes,
+                    "SVE C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+                prop_assert!(result.lines <= result.chars,
+                    "SVE C locale: lines ({}) must be <= chars ({})", result.lines, result.chars);
             }
         }
     }
