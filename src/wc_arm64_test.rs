@@ -34,4 +34,58 @@ mod tests {
         let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), locale) };
         assert_eq!(result, expected);
     }
+
+    // ====================================================================
+    // Property-Based Tests (PropTest)
+    // ====================================================================
+    use proptest::prelude::*;
+
+    // Property: bytes == input length (ARM64 NEON)
+    #[cfg(target_arch = "aarch64")]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_neon(input in "\\PC*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+            prop_assert_eq!(result.bytes, input.len(), "NEON");
+        }
+    }
+
+    // Property: bytes == input length (ARM64 SVE)
+    #[cfg(target_arch = "aarch64")]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_sve(input in "\\PC*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "SVE");
+            }
+        }
+    }
+
+    // Property 2: bytes >= chars >= lines
+    #[cfg(target_arch = "aarch64")]
+    proptest! {
+        #[test]
+        fn prop_bytes_ge_chars_ge_lines_neon(input in "\\PC*") {
+            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
+            prop_assert!(result.bytes >= result.chars,
+                "NEON: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+            prop_assert!(result.chars >= result.lines,
+                "NEON: chars ({}) must be >= lines ({})", result.chars, result.lines);
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    proptest! {
+        #[test]
+        fn prop_bytes_ge_chars_ge_lines_sve(input in "\\PC*") {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert!(result.bytes >= result.chars,
+                    "SVE: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+                prop_assert!(result.chars >= result.lines,
+                    "SVE: chars ({}) must be >= lines ({})", result.chars, result.lines);
+            }
+        }
+    }
 }

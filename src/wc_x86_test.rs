@@ -52,4 +52,88 @@ mod tests {
             assert_eq!(result, expected);
         }
     }
+
+    // ====================================================================
+    // Property-Based Tests (PropTest)
+    // ====================================================================
+
+    use proptest::prelude::*;
+
+    // Property: bytes == input length
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_sse2(input in "\\PC*") {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "SSE2");
+            }
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_avx2(input in "\\PC*") {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "AVX2");
+            }
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_equals_input_length_avx512(input in "\\PC*") {
+            if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
+                let result = unsafe { crate::wc_x86::count_text_avx512bw(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert_eq!(result.bytes, input.len(), "AVX512BW");
+            }
+        }
+    }
+
+    // Property 2: bytes >= chars >= lines (x86 SSE2)
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_ge_chars_ge_lines_sse2(input in "\\PC*") {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert!(result.bytes >= result.chars,
+                    "SSE2: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+                prop_assert!(result.chars >= result.lines,
+                    "SSE2: chars ({}) must be >= lines ({})", result.chars, result.lines);
+            }
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_ge_chars_ge_lines_avx2(input in "\\PC*") {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert!(result.bytes >= result.chars,
+                    "AVX2: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+                prop_assert!(result.chars >= result.lines,
+                    "AVX2: chars ({}) must be >= lines ({})", result.chars, result.lines);
+            }
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    proptest! {
+        #[test]
+        fn prop_bytes_ge_chars_ge_lines_avx512(input in "\\PC*") {
+            if is_x86_feature_detected!("avx512bw") {
+                let result = unsafe { crate::wc_x86::count_text_avx512bw(input.as_bytes(), LocaleEncoding::Utf8) };
+                prop_assert!(result.bytes >= result.chars,
+                    "AVX512BW: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+                prop_assert!(result.chars >= result.lines,
+                    "AVX512BW: chars ({}) must be >= lines ({})", result.chars, result.lines);
+            }
+        }
+    }
 }

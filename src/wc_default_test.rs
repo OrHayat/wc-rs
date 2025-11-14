@@ -365,7 +365,7 @@ pub mod tests {
     // ====================================================================
     use proptest::prelude::*;
 
-    // Test 1: Most basic invariant - bytes should equal input length
+    // Property 1: bytes should equal input length
     proptest! {
         #[test]
         fn prop_bytes_equals_input_length_scalar(input in "\\PC*") {
@@ -375,61 +375,15 @@ pub mod tests {
         }
     }
 
-    // Property: bytes == input length (x86 SSE2)
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    // Property 2: bytes >= chars >= lines (UTF-8 uses 1-4 bytes per char, newlines are chars)
     proptest! {
         #[test]
-        fn prop_bytes_equals_input_length_sse2(input in "\\PC*") {
-            if is_x86_feature_detected!("sse2") {
-                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
-                prop_assert_eq!(result.bytes, input.len(), "SSE2");
-            }
-        }
-    }
-
-    // Property: bytes == input length (x86 AVX2)
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    proptest! {
-        #[test]
-        fn prop_bytes_equals_input_length_avx2(input in "\\PC*") {
-            if is_x86_feature_detected!("avx2") {
-                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
-                prop_assert_eq!(result.bytes, input.len(), "AVX2");
-            }
-        }
-    }
-
-    // Property: bytes == input length (x86 AVX512BW)
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    proptest! {
-        #[test]
-        fn prop_bytes_equals_input_length_avx512(input in "\\PC*") {
-            if is_x86_feature_detected!("avx512bw") {
-                let result = unsafe { crate::wc_x86::count_text_avx512bw(input.as_bytes(), LocaleEncoding::Utf8) };
-                prop_assert_eq!(result.bytes, input.len(), "AVX512BW");
-            }
-        }
-    }
-
-    // Property: bytes == input length (ARM64 NEON)
-    #[cfg(target_arch = "aarch64")]
-    proptest! {
-        #[test]
-        fn prop_bytes_equals_input_length_neon(input in "\\PC*") {
-            let result = unsafe { crate::wc_arm64::count_text_neon(input.as_bytes(), LocaleEncoding::Utf8) };
-            prop_assert_eq!(result.bytes, input.len(), "NEON");
-        }
-    }
-
-    // Property: bytes == input length (ARM64 SVE)
-    #[cfg(target_arch = "aarch64")]
-    proptest! {
-        #[test]
-        fn prop_bytes_equals_input_length_sve(input in "\\PC*") {
-            if std::arch::is_aarch64_feature_detected!("sve") {
-                let result = unsafe { crate::wc_arm64::count_text_sve(input.as_bytes(), LocaleEncoding::Utf8) };
-                prop_assert_eq!(result.bytes, input.len(), "SVE");
-            }
+        fn prop_bytes_ge_chars_ge_lines_scalar(input in "\\PC*") {
+            let result = word_count_scalar(&input, LocaleEncoding::Utf8);
+            prop_assert!(result.bytes >= result.chars,
+                "bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+            prop_assert!(result.chars >= result.lines,
+                "chars ({}) must be >= lines ({})", result.chars, result.lines);
         }
     }
 }
