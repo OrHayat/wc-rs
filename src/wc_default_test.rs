@@ -293,7 +293,6 @@ pub mod tests {
     #[case::word_with_period("hello.world", LocaleEncoding::Utf8, counts(0, 1, 11, 11))]
     #[case::sentence("Hello, world!", LocaleEncoding::Utf8, counts(0, 2, 13, 13))]
     #[case::quoted_word("\"hello\"", LocaleEncoding::Utf8, counts(0, 1, 7, 7))]
-    // Note: Invalid UTF-8 sequences tested separately in detect_incomplete_utf8_suffix tests
     // String literals must be valid UTF-8, but invalid sequences are handled at byte level
     // C locale specific edge cases
     #[case::c_locale_with_newline("hello\nworld", LocaleEncoding::C, counts(1, 2, 11, 11))] // Test newline counting in C locale

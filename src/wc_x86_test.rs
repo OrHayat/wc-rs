@@ -419,4 +419,96 @@ mod tests {
             }
         }
     }
+
+    // Property 7c: Differential Testing - SIMD == Scalar (All chars including control, UTF-8 locale)
+    proptest! {
+        #[test]
+        fn prop_differential_sse2_vs_scalar_utf8_all(input in ".*") {
+            if is_x86_feature_detected!("sse2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "SSE2 all: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "SSE2 all: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "SSE2 all: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "SSE2 all: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx2_vs_scalar_utf8_all(input in ".*") {
+            if is_x86_feature_detected!("avx2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX2 all: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX2 all: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX2 all: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX2 all: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx512_vs_scalar_utf8_all(input in ".*") {
+            if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::Utf8);
+                let simd = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX512 all: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX512 all: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX512 all: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX512 all: chars mismatch");
+            }
+        }
+    }
+
+    // Property 7d: Differential Testing - SIMD == Scalar (All chars, C locale)
+    proptest! {
+        #[test]
+        fn prop_differential_sse2_vs_scalar_c_all(input in ".*") {
+            if is_x86_feature_detected!("sse2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::C);
+                let simd = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::C) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "SSE2 C: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "SSE2 C: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "SSE2 C: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "SSE2 C: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx2_vs_scalar_c_all(input in ".*") {
+            if is_x86_feature_detected!("avx2") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::C);
+                let simd = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::C) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX2 C: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX2 C: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX2 C: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX2 C: chars mismatch");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_differential_avx512_vs_scalar_c_all(input in ".*") {
+            if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
+                let scalar = crate::wc_default::word_count_scalar(&input, LocaleEncoding::C);
+                let simd = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::C) };
+
+                prop_assert_eq!(scalar.lines, simd.lines, "AVX512 C: lines mismatch");
+                prop_assert_eq!(scalar.words, simd.words, "AVX512 C: words mismatch");
+                prop_assert_eq!(scalar.bytes, simd.bytes, "AVX512 C: bytes mismatch");
+                prop_assert_eq!(scalar.chars, simd.chars, "AVX512 C: chars mismatch");
+            }
+        }
+    }
 }
