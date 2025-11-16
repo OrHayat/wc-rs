@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
+use rayon::prelude::*;
 use std::io::{self, Read};
 use std::path::PathBuf;
 
@@ -49,6 +50,28 @@ fn detect_locale() -> LocaleEncoding {
     }
 }
 
+/// Determine the number of threads to use for parallel processing
+/// - None: use min(4, num_cpus) - default
+/// - Some(0): use all CPUs
+/// - Some(n): use exactly n threads
+fn determine_thread_count(num_threads: Option<usize>) -> usize {
+    match num_threads {
+        None => {
+            // Default: min(4, num_cpus)
+            let cpus = num_cpus::get();
+            cpus.min(4)
+        }
+        Some(0) => {
+            // -j or -j 0: use all CPUs
+            num_cpus::get()
+        }
+        Some(n) => {
+            // -j N: use exactly N threads
+            n
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     version,
@@ -72,6 +95,21 @@ struct WordCountArgs {
     /// Print the character counts (multi-byte aware)
     #[arg(short = 'm', long = "chars", action = ArgAction::SetTrue)]
     chars: bool,
+
+    /// Number of threads for parallel file processing
+    /// Default: min(4, num_cpus)
+    /// -j without value or -j 0: use all CPUs
+    /// -j N: use N threads
+    #[arg(
+        short = 'j',
+        long = "num-threads",
+        value_name = "N",
+        require_equals = true,
+        num_args = 0..=1,
+        default_missing_value = "0",
+        value_parser = clap::value_parser!(usize)
+    )]
+    num_threads: Option<usize>,
 
     /// Input files; use '-' for stdin. If empty, read from stdin.
     #[arg(value_name = "FILE", value_hint = clap::ValueHint::FilePath)]
@@ -98,10 +136,13 @@ fn run() -> Result<()> {
     // Detect locale once at startup
     let locale = detect_locale();
 
+    // Determine thread count for parallel processing
+    let thread_count = determine_thread_count(args.num_threads);
+
     if args.files.is_empty() {
         process_stdin(&args, locale)?;
     } else {
-        process_files(&args, locale)?;
+        process_files(&args, locale, thread_count)?;
     }
 
     Ok(())
@@ -114,34 +155,51 @@ fn process_stdin(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
     Ok(())
 }
 
-fn process_files(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
-    let mut total = FileCounts {
-        lines: 0,
-        words: 0,
-        bytes: 0,
-        chars: 0,
-    };
+fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usize) -> Result<()> {
+    // Configure rayon thread pool
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(thread_count)
+        .build()
+        .context("failed to build thread pool")?
+        .install(|| {
+            // Process files in parallel, preserving order
+            let results: Result<Vec<_>> = args.files
+                .par_iter()
+                .map(|file_path| {
+                    let content = std::fs::read(file_path)
+                        .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
+                    let stats = count_text(&content, locale);
+                    Ok((file_path, stats))
+                })
+                .collect();
 
-    for file_path in &args.files {
-        let content = std::fs::read(file_path)
-            .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
-        let stats = count_text(&content, locale);
+            let file_results = results?;
 
-        // Accumulate totals
-        total.lines += stats.lines;
-        total.words += stats.words;
-        total.bytes += stats.bytes;
-        total.chars += stats.chars;
+            // Calculate totals
+            let mut total = FileCounts {
+                lines: 0,
+                words: 0,
+                bytes: 0,
+                chars: 0,
+            };
 
-        print_stats(&stats, args, Some(file_path));
-    }
+            // Print results in original order
+            for (file_path, stats) in &file_results {
+                total.lines += stats.lines;
+                total.words += stats.words;
+                total.bytes += stats.bytes;
+                total.chars += stats.chars;
 
-    // Print total line if multiple files
-    if args.files.len() > 1 {
-        print_total(&total, args);
-    }
+                print_stats(stats, args, Some(file_path));
+            }
 
-    Ok(())
+            // Print total line if multiple files
+            if args.files.len() > 1 {
+                print_total(&total, args);
+            }
+
+            Ok(())
+        })
 }
 
 fn print_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&PathBuf>) {
