@@ -148,33 +148,6 @@ static inline size_t sve_count_utf8_chars(svbool_t pg, svuint8_t chunk) {
     return svcntp_b8(pg, is_not_continuation);
 }
 
-// Detect ASCII whitespace: space (0x20) or range [0x09-0x0D]
-// Returns count of whitespace bytes for tracking word boundaries
-static inline size_t sve_count_whitespace(svbool_t pg, svuint8_t chunk, bool *all_ws, bool *any_ws) {
-    svuint8_t ws_min = svdup_n_u8(0x09);  // tab
-    svuint8_t ws_max = svdup_n_u8(0x0D);  // carriage return
-    svuint8_t space = svdup_n_u8(0x20);
-
-    // Range check: [0x09, 0x0D]
-    svbool_t in_range = svand_b_z(pg,
-                                   svcmpge_u8(pg, chunk, ws_min),
-                                   svcmple_u8(pg, chunk, ws_max));
-
-    // Check space
-    svbool_t is_space = svcmpeq_u8(pg, chunk, space);
-
-    // Combine: is whitespace if in_range OR is_space
-    svbool_t is_ws = svorr_b_z(pg, in_range, is_space);
-
-    size_t ws_count = svcntp_b8(pg, is_ws);
-    size_t total_count = svcntp_b8(pg, pg);
-
-    *all_ws = (ws_count == total_count);
-    *any_ws = (ws_count > 0);
-
-    return ws_count;
-}
-
 // Count word starts in SVE vector
 // A word start is: current byte is not whitespace AND previous byte was whitespace
 // This is a simplified version - extract to array and process
