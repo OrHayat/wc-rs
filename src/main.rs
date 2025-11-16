@@ -117,8 +117,8 @@ struct WordCountArgs {
 }
 
 fn main() {
-    if let Err(e) = run() {
-        eprintln!("wc-rs: {}", e);
+    if let Err(_) = run() {
+        // Errors already printed to stderr
         std::process::exit(1);
     }
 }
@@ -163,34 +163,49 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
         .context("failed to build thread pool")?
         .install(|| {
             // Process files in parallel, preserving order
-            let results: Result<Vec<_>> = args.files
+            // Returns Result<FileCounts> for success, or error message for failure
+            let results: Vec<Result<FileCounts>> = args.files
                 .par_iter()
                 .map(|file_path| {
-                    let content = std::fs::read(file_path)
-                        .with_context(|| format!("failed to read file '{}'", file_path.display()))?;
-                    let stats = count_text(&content, locale);
-                    Ok((file_path, stats))
+                    match std::fs::read(file_path) {
+                        Ok(content) => {
+                            let stats = count_text(&content, locale);
+                            Ok(stats)
+                        }
+                        Err(e) => {
+                            // Print error to stderr and continue
+                            eprintln!("wc-rs: {}: {}", file_path.display(), e);
+                            Err(anyhow::anyhow!("failed to read file"))
+                        }
+                    }
                 })
                 .collect();
 
-            let file_results = results?;
-
-            // Calculate totals
+            // Calculate totals and track errors
             let mut total = FileCounts {
                 lines: 0,
                 words: 0,
                 bytes: 0,
                 chars: 0,
             };
+            let mut had_errors = false;
 
             // Print results in original order
-            for (file_path, stats) in &file_results {
-                total.lines += stats.lines;
-                total.words += stats.words;
-                total.bytes += stats.bytes;
-                total.chars += stats.chars;
+            for (i, result) in results.iter().enumerate() {
+                match result {
+                    Ok(stats) => {
+                        total.lines += stats.lines;
+                        total.words += stats.words;
+                        total.bytes += stats.bytes;
+                        total.chars += stats.chars;
 
-                print_stats(stats, args, Some(file_path));
+                        print_stats(stats, args, Some(&args.files[i]));
+                    }
+                    Err(_) => {
+                        had_errors = true;
+                        // Error already printed to stderr in the map
+                    }
+                }
             }
 
             // Print total line if multiple files
@@ -198,7 +213,12 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
                 print_total(&total, args);
             }
 
-            Ok(())
+            // Return error if any files failed
+            if had_errors {
+                Err(anyhow::anyhow!("one or more files failed to process"))
+            } else {
+                Ok(())
+            }
         })
 }
 
