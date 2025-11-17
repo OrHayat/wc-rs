@@ -111,6 +111,10 @@ struct WordCountArgs {
     )]
     num_threads: Option<usize>,
 
+    /// Read input from the files specified by NUL-terminated names in file F
+    #[arg(long = "files0-from", value_name = "F", value_hint = clap::ValueHint::FilePath)]
+    files0_from: Option<PathBuf>,
+
     /// Input files; use '-' for stdin. If empty, read from stdin.
     #[arg(value_name = "FILE", value_hint = clap::ValueHint::FilePath)]
     files: Vec<PathBuf>,
@@ -131,6 +135,15 @@ fn run() -> Result<()> {
         args.lines = true;
         args.words = true;
         args.bytes = true;
+    }
+
+    // Handle files0-from option
+    if let Some(ref files0_path) = args.files0_from {
+        if !args.files.is_empty() {
+            eprintln!("wc-rs: file operands cannot be combined with --files0-from");
+            return Err(anyhow::anyhow!("invalid arguments"));
+        }
+        args.files = read_files0_from(files0_path)?;
     }
 
     // Detect locale once at startup
@@ -264,6 +277,39 @@ fn read_stdin() -> Result<Vec<u8>> {
         .read_to_end(&mut buffer)
         .context("failed to read from stdin")?;
     Ok(buffer)
+}
+
+/// Read NUL-terminated filenames from a file (for --files0-from option)
+fn read_files0_from(path: &PathBuf) -> Result<Vec<PathBuf>> {
+    let content = if path.to_str() == Some("-") {
+        // Read from stdin
+        read_stdin()?
+    } else {
+        // Read from file
+        std::fs::read(path)
+            .with_context(|| format!("failed to read from '{}'", path.display()))?
+    };
+
+    // Split on NUL characters and convert to PathBufs
+    let files: Vec<PathBuf> = content
+        .split(|&b| b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            // Convert bytes to PathBuf
+            #[cfg(unix)]
+            {
+                use std::{os::unix::ffi::OsStrExt};
+                PathBuf::from(std::ffi::OsStr::from_bytes(s))
+            }
+            #[cfg(not(unix))]
+            {
+                // On non-Unix systems, assume UTF-8
+                PathBuf::from(String::from_utf8_lossy(s).to_string())
+            }
+        })
+        .collect();
+
+    Ok(files)
 }
 
 /// Count text statistics using the fastest available method (SIMD or scalar)
