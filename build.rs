@@ -4,6 +4,58 @@ fn main() {
     if target_arch == "aarch64" {
         build_sve_if_available();
     }
+
+    generate_build_info();
+}
+
+/// Generate build information for --version flag
+fn generate_build_info() {
+    // Git commit hash
+    let git_hash = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Git dirty status
+    let git_dirty = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    let git_info = if git_dirty {
+        format!("{}-dirty", git_hash)
+    } else {
+        git_hash
+    };
+
+    // Build date
+    let build_date = chrono_lite_date();
+
+    // Target triple
+    let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
+
+    println!("cargo:rustc-env=BUILD_GIT_HASH={}", git_info);
+    println!("cargo:rustc-env=BUILD_DATE={}", build_date);
+    println!("cargo:rustc-env=BUILD_TARGET={}", target);
+
+    // Rerun if git HEAD changes
+    println!("cargo:rerun-if-changed=.git/HEAD");
+}
+
+/// Simple date without external crate
+fn chrono_lite_date() -> String {
+    std::process::Command::new("date")
+        .args(["+%Y-%m-%d"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Attempts to build SVE C code if the toolchain supports it

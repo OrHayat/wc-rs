@@ -80,9 +80,22 @@ fn determine_thread_count(num_threads: Option<usize>) -> usize {
     }
 }
 
+/// Build version string with build info (semver format)
+fn version_string() -> &'static str {
+    concat!(
+        env!("CARGO_PKG_VERSION"),
+        "+",
+        env!("BUILD_GIT_HASH"),
+        ".",
+        env!("BUILD_DATE"),
+        ".",
+        env!("BUILD_TARGET")
+    )
+}
+
 #[derive(Parser, Debug)]
 #[command(
-    version,
+    version = version_string(),
     about = "Print newline, word, and byte counts for each FILE.",
     long_about = r#"Print newline, word, and byte counts for each FILE, and a total line if more than one FILE is specified.
 A word is a non-zero-length sequence of printable characters delimited by white space."#
