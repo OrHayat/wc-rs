@@ -180,7 +180,15 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
             let results: Vec<Result<FileCounts>> = args.files
                 .par_iter()
                 .map(|file_path| {
-                    match std::fs::read(file_path) {
+                    // Check if this is stdin
+                    let content = if file_path.to_str() == Some("-") {
+                        read_stdin()
+                    } else {
+                        std::fs::read(file_path)
+                            .with_context(|| format!("{}", file_path.display()))
+                    };
+
+                    match content {
                         Ok(content) => {
                             let stats = count_text(&content, locale);
                             Ok(stats)
