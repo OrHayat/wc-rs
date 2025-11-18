@@ -75,7 +75,7 @@ pub mod tests {
     #[rstest]
     // Empty and whitespace-only cases
     #[case::empty("", LocaleEncoding::Utf8, counts(0, 0, 0, 0))]
-    #[case::empty_c_locale("", LocaleEncoding::C, counts(0, 0, 0, 0))]
+    #[case::empty_c_locale("", LocaleEncoding::SingleByte, counts(0, 0, 0, 0))]
     #[case::single_space(" ", LocaleEncoding::Utf8, counts(0, 0, 1, 1))]
     #[case::multiple_spaces("   ", LocaleEncoding::Utf8, counts(0, 0, 3, 3))]
     #[case::single_newline("\n", LocaleEncoding::Utf8, counts(1, 0, 1, 1))]
@@ -131,14 +131,14 @@ pub mod tests {
         counts(0, 1, 17, 21)
     )]
     // C locale: bytes = chars
-    #[case::c_locale_ascii("hello world", LocaleEncoding::C, counts(0, 2, 11, 11))]
-    #[case::c_locale_utf8_bytes("café", LocaleEncoding::C, counts(0, 1, 5, 5))] // 5 bytes = 5 chars in C
-    #[case::c_locale_emoji("💯", LocaleEncoding::C, counts(0, 1, 4, 4))] // 4 bytes = 4 chars in C
+    #[case::c_locale_ascii("hello world", LocaleEncoding::SingleByte, counts(0, 2, 11, 11))]
+    #[case::c_locale_utf8_bytes("café", LocaleEncoding::SingleByte, counts(0, 1, 5, 5))] // 5 bytes = 5 chars in C
+    #[case::c_locale_emoji("💯", LocaleEncoding::SingleByte, counts(0, 1, 4, 4))] // 4 bytes = 4 chars in C
 
     // C locale: no Unicode whitespace detection (only ASCII)
     #[case::c_locale_non_breaking_space_no_split(
         "hello\u{00A0}world",
-        LocaleEncoding::C,
+        LocaleEncoding::SingleByte,
         counts(0, 1, 12, 12)
     )] // Non-breaking space not recognized, 1 word
 
@@ -295,29 +295,29 @@ pub mod tests {
     #[case::quoted_word("\"hello\"", LocaleEncoding::Utf8, counts(0, 1, 7, 7))]
     // String literals must be valid UTF-8, but invalid sequences are handled at byte level
     // C locale specific edge cases
-    #[case::c_locale_with_newline("hello\nworld", LocaleEncoding::C, counts(1, 2, 11, 11))] // Test newline counting in C locale
-    #[case::c_locale_multiple_newlines("a\nb\nc\n", LocaleEncoding::C, counts(3, 3, 6, 6))] // Multiple newlines in C locale
+    #[case::c_locale_with_newline("hello\nworld", LocaleEncoding::SingleByte, counts(1, 2, 11, 11))] // Test newline counting in C locale
+    #[case::c_locale_multiple_newlines("a\nb\nc\n", LocaleEncoding::SingleByte, counts(3, 3, 6, 6))] // Multiple newlines in C locale
     #[case::c_locale_multibyte_as_bytes(
         "café\u{2003}test",
-        LocaleEncoding::C,
+        LocaleEncoding::SingleByte,
         counts(0, 1, 12, 12)
     )] // café(5) + em-space(3) + test(4) = 12 bytes = 12 chars in C
-    #[case::c_locale_emoji_as_bytes("💯test", LocaleEncoding::C, counts(0, 1, 8, 8))] // 4 emoji bytes + 4 ASCII
+    #[case::c_locale_emoji_as_bytes("💯test", LocaleEncoding::SingleByte, counts(0, 1, 8, 8))] // 4 emoji bytes + 4 ASCII
     #[case::c_locale_only_ascii_whitespace(
         "word1\u{00A0}word2",
-        LocaleEncoding::C,
+        LocaleEncoding::SingleByte,
         counts(0, 1, 12, 12)
     )] // nbsp not recognized
     // C locale with ASCII >= 16 bytes (tests SIMD path on ARM64 NEON)
-    #[case::c_locale_ascii_16_bytes("abcdefghijklmnop", LocaleEncoding::C, counts(0, 1, 16, 16))] // Exactly 16 bytes
+    #[case::c_locale_ascii_16_bytes("abcdefghijklmnop", LocaleEncoding::SingleByte, counts(0, 1, 16, 16))] // Exactly 16 bytes
     #[case::c_locale_ascii_32_bytes(
         "hello world test data here!!",
-        LocaleEncoding::C,
+        LocaleEncoding::SingleByte,
         counts(0, 5, 28, 28)
     )] // 28 bytes, multiple chunks
     #[case::c_locale_ascii_48_bytes(
         "the quick brown fox jumps over the lazy dog here",
-        LocaleEncoding::C,
+        LocaleEncoding::SingleByte,
         counts(0, 10, 48, 48)
     )] // 48 bytes
     // Extreme cases
@@ -425,7 +425,7 @@ pub mod tests {
     // C locale: invalid bytes ARE chars
     #[case::invalid_c_locale(
         &[0xFFu8, 0xFEu8, 0xFDu8][..],
-        LocaleEncoding::C,
+        LocaleEncoding::SingleByte,
         counts(0, 1, 3, 3)  // C locale: all bytes are chars
     )]
     // Invalid byte then newline: isolated invalid byte doesn't form word
@@ -588,7 +588,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_c_locale_lines_le_chars_eq_bytes_scalar(input in "\\PC*") {
-            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::C);
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::SingleByte);
             prop_assert_eq!(result.chars, result.bytes,
                 "C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
             prop_assert!(result.lines <= result.chars,
@@ -663,7 +663,7 @@ pub mod tests {
     proptest! {
         #[test]
         fn prop_c_locale_any_bytes_chars_eq_bytes_scalar(bytes in prop_vec(0u8..=255u8, 0..100)) {
-            let result = word_count_scalar(&bytes, LocaleEncoding::C);
+            let result = word_count_scalar(&bytes, LocaleEncoding::SingleByte);
             prop_assert_eq!(result.chars, result.bytes,
                 "C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
         }
@@ -949,7 +949,7 @@ pub mod tests {
         fn prop_c_locale_comprehensive_scalar(
             bytes in prop_vec(0u8..=255u8, 1..200)
         ) {
-            let result = word_count_scalar(&bytes, LocaleEncoding::C);
+            let result = word_count_scalar(&bytes, LocaleEncoding::SingleByte);
 
             // C locale: every byte is a char
             prop_assert_eq!(result.chars, result.bytes,

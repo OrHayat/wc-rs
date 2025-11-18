@@ -29,8 +29,8 @@ pub struct FileCounts {
 /// Locale encoding type for character handling
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LocaleEncoding {
-    /// C/POSIX locale - byte-based, ASCII whitespace only
-    C,
+    /// Single-byte encoding (C/POSIX, Latin-1, ISO-8859-*) - byte-based, ASCII whitespace only
+    SingleByte,
     /// UTF-8 locale - Unicode aware, multi-byte characters
     Utf8,
 }
@@ -42,8 +42,16 @@ fn detect_locale() -> LocaleEncoding {
         .or_else(|_| std::env::var("LANG"))
         .unwrap_or_default();
 
-    if locale == "C" || locale == "POSIX" {
-        LocaleEncoding::C
+    let locale_upper = locale.to_uppercase();
+
+    // Check for single-byte encodings: C/POSIX, Latin-1, ISO-8859-*
+    if locale == "C"
+        || locale == "POSIX"
+        || locale_upper.contains("LATIN1")
+        || locale_upper.contains("LATIN-1")
+        || locale_upper.contains("ISO-8859")
+        || locale_upper.contains("ISO8859") {
+        LocaleEncoding::SingleByte
     } else {
         // Default to UTF-8 for all other locales
         LocaleEncoding::Utf8

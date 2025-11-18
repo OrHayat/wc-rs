@@ -134,7 +134,7 @@ mod tests {
         #[test]
         fn prop_c_locale_lines_le_chars_eq_bytes_sse2(input in "\\PC*") {
             if is_x86_feature_detected!("sse2") {
-                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::C) };
+                let result = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::SingleByte) };
                 prop_assert_eq!(result.chars, result.bytes,
                     "SSE2 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
                 prop_assert!(result.lines <= result.chars,
@@ -147,7 +147,7 @@ mod tests {
         #[test]
         fn prop_c_locale_lines_le_chars_eq_bytes_avx2(input in "\\PC*") {
             if is_x86_feature_detected!("avx2") {
-                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::C) };
+                let result = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::SingleByte) };
                 prop_assert_eq!(result.chars, result.bytes,
                     "AVX2 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
                 prop_assert!(result.lines <= result.chars,
@@ -160,7 +160,7 @@ mod tests {
         #[test]
         fn prop_c_locale_lines_le_chars_eq_bytes_avx512(input in "\\PC*") {
             if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
-                let result = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::C) };
+                let result = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::SingleByte) };
                 prop_assert_eq!(result.chars, result.bytes,
                     "AVX512 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
                 prop_assert!(result.lines <= result.chars,
@@ -472,8 +472,8 @@ mod tests {
         #[test]
         fn prop_differential_sse2_vs_scalar_c_all(input in ".*") {
             if is_x86_feature_detected!("sse2") {
-                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::C);
-                let simd = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::C) };
+                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::SingleByte);
+                let simd = unsafe { crate::wc_x86::count_text_sse2(input.as_bytes(), LocaleEncoding::SingleByte) };
 
                 prop_assert_eq!(scalar.lines, simd.lines, "SSE2 C: lines mismatch");
                 prop_assert_eq!(scalar.words, simd.words, "SSE2 C: words mismatch");
@@ -576,7 +576,7 @@ mod tests {
         #[test]
         fn prop_c_locale_any_bytes_sse2(bytes in prop_vec(0u8..=255u8, 0..100)) {
             if is_x86_feature_detected!("sse2") {
-                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::C) };
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::SingleByte) };
                 prop_assert_eq!(result.chars, result.bytes,
                     "SSE2 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
             }
@@ -588,7 +588,7 @@ mod tests {
         #[test]
         fn prop_c_locale_any_bytes_avx2(bytes in prop_vec(0u8..=255u8, 0..100)) {
             if is_x86_feature_detected!("avx2") {
-                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::C) };
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::SingleByte) };
                 prop_assert_eq!(result.chars, result.bytes,
                     "AVX2 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
             }
@@ -600,7 +600,7 @@ mod tests {
         #[test]
         fn prop_c_locale_any_bytes_avx512(bytes in prop_vec(0u8..=255u8, 0..100)) {
             if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
-                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::C) };
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::SingleByte) };
                 prop_assert_eq!(result.chars, result.bytes,
                     "AVX512 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
             }
@@ -611,8 +611,8 @@ mod tests {
         #[test]
         fn prop_differential_avx2_vs_scalar_c_all(input in ".*") {
             if is_x86_feature_detected!("avx2") {
-                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::C);
-                let simd = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::C) };
+                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::SingleByte);
+                let simd = unsafe { crate::wc_x86::count_text_avx2(input.as_bytes(), LocaleEncoding::SingleByte) };
 
                 prop_assert_eq!(scalar.lines, simd.lines, "AVX2 C: lines mismatch");
                 prop_assert_eq!(scalar.words, simd.words, "AVX2 C: words mismatch");
@@ -626,8 +626,8 @@ mod tests {
         #[test]
         fn prop_differential_avx512_vs_scalar_c_all(input in ".*") {
             if is_x86_feature_detected!("avx512bw")&& is_x86_feature_detected!("avx512f") {
-                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::C);
-                let simd = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::C) };
+                let scalar = crate::wc_default::word_count_scalar(input.as_bytes(), LocaleEncoding::SingleByte);
+                let simd = unsafe { crate::wc_x86::count_text_avx512(input.as_bytes(), LocaleEncoding::SingleByte) };
 
                 prop_assert_eq!(scalar.lines, simd.lines, "AVX512 C: lines mismatch");
                 prop_assert_eq!(scalar.words, simd.words, "AVX512 C: words mismatch");

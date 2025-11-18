@@ -22,15 +22,16 @@
 - Required for compatibility with existing scripts
 - **Priority: HIGH**
 
-#### Stdin handling with `-` argument
-- Currently **BROKEN** - tries to open '-' as a file
+#### ✅ Stdin handling with `-` argument
 - GNU wc accepts `-` to explicitly read stdin in file list
 - **Priority: CRITICAL**
+- **Status: COMPLETED**
 
-#### `--files0-from=FILE` option
+#### ✅ `--files0-from=FILE` option
 - GNU wc feature for null-delimited file lists
 - Important for xargs integration
 - **Priority: MEDIUM**
+- **Status: COMPLETED**
 
 ---
 
@@ -184,7 +185,7 @@ readme = "README.md"
 
 ### P0 (Must Have Before v1.0)
 1. ✅ Add LICENSE file
-2. ✅ Fix stdin `-` handling bug
+2. ✅ Fix stdin `-` handling bug (completed 2025-11-18)
 3. ✅ Create comprehensive README.md
 4. ✅ Implement `-L` flag
 5. ✅ Add package metadata to Cargo.toml
@@ -213,7 +214,7 @@ readme = "README.md"
 - ✅ Faster (with SIMD)
 - ✅ Parallel processing
 - ❌ Missing `-L` flag
-- ❌ Missing `--files0-from`
+- ✅ `--files0-from` support
 - ❌ No man page
 - ❌ Not packaged anywhere
 
@@ -247,3 +248,12 @@ readme = "README.md"
 You have built a **technically impressive SIMD-optimized implementation**, but it's **not production-ready** and **not distributable**. The project needs infrastructure, documentation, and completion of standard features before it can be considered a viable alternative to GNU wc.
 
 **Next steps:** Focus on P0 items to get to a v1.0 release.
+
+---
+
+## CODE IMPROVEMENTS 🔧
+
+### ✅ Encoding Support Refactoring (Completed)
+- ✅ Renamed `LocaleEncoding::C` enum variant to `SingleByte` to better reflect its purpose
+- ✅ Updated implementation to support mapping of multiple single-byte encodings (C/POSIX, Latin-1, ISO-8859-*) to the `SingleByte` variant
+- ✅ Updated all test files and implementation to use the new enum variant name

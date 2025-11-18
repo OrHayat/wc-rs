@@ -370,7 +370,7 @@ macro_rules! define_simd_text_counter {
                     result_acc.lines += unsafe { $count_newlines_fn(chunk_vec) };
 
                     result_acc.chars += match locale {
-                        LocaleEncoding::C => CHUNK_SIZE,
+                        LocaleEncoding::SingleByte => CHUNK_SIZE,
                         LocaleEncoding::Utf8 => unsafe { $count_utf8_chars_fn(chunk_vec) },
                     };
 
@@ -487,7 +487,7 @@ pub(crate) unsafe fn count_text_sse2_manual(content: &[u8], locale: LocaleEncodi
             result_acc.lines += unsafe { sse2_count_newlines(chunk_vec) };
 
             result_acc.chars += match locale {
-                LocaleEncoding::C => CHUNK_SIZE,
+                LocaleEncoding::SingleByte => CHUNK_SIZE,
                 LocaleEncoding::Utf8 => unsafe { sse2_count_utf8_chars(chunk_vec) },
             };
 

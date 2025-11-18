@@ -52,7 +52,7 @@ pub(crate) unsafe fn count_text_sve(content: &[u8], locale: LocaleEncoding) -> F
     if !has_non_ascii && locale == LocaleEncoding::Utf8 {
         // Pure ASCII - safe to use C implementation
         let locale_byte = match locale {
-            LocaleEncoding::C => 0,
+            LocaleEncoding::SingleByte => 0,
             LocaleEncoding::Utf8 => 1,
         };
         return unsafe {
@@ -273,7 +273,7 @@ pub(crate) unsafe fn count_text_neon(content: &[u8], locale: LocaleEncoding) -> 
             result_acc.lines += unsafe { neon_count_newlines(chunk_vec) };
 
             result_acc.chars += match locale {
-                LocaleEncoding::C => CHUNK_SIZE,
+                LocaleEncoding::SingleByte => CHUNK_SIZE,
                 LocaleEncoding::Utf8 => unsafe { neon_count_utf8_chars(chunk_vec) },
             };
 

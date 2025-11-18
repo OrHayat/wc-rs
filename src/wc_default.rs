@@ -18,7 +18,7 @@ pub(crate) fn word_count_scalar_with_state(
     locale: LocaleEncoding,
 ) -> ScalarResult {
     match locale {
-        LocaleEncoding::C => word_count_scalar_bytes(content, initial_seen_space),
+        LocaleEncoding::SingleByte => word_count_scalar_bytes(content, initial_seen_space),
         LocaleEncoding::Utf8 => word_count_scalar_chars(content, initial_seen_space),
     }
 }
