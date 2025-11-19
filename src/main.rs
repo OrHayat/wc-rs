@@ -1,8 +1,21 @@
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, ValueEnum};
 use rayon::prelude::*;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use thiserror::Error;
+
+/// Control when to print the "total" line
+#[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
+pub enum TotalOption {
+    /// Print total only when more than one file (default)
+    Auto,
+    /// Always print total, even for single file
+    Always,
+    /// Never print total
+    Never,
+    /// Print only the total, not individual file stats
+    Only,
+}
 
 /// Custom error type for wc-rs
 #[derive(Debug, Error)]
@@ -244,6 +257,15 @@ struct WordCountArgs {
     #[arg(long = "debug", action = ArgAction::SetTrue)]
     debug: bool,
 
+    /// When to print the "total" line
+    #[arg(
+        long = "total",
+        value_enum,
+        default_value = "auto",
+        value_name = "WHEN"
+    )]
+    total: TotalOption,
+
     /// Input files; use '-' for stdin. If empty, read from stdin.
     #[arg(value_name = "FILE", value_hint = clap::ValueHint::FilePath)]
     files: Vec<PathBuf>,
@@ -369,7 +391,8 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
             };
             let mut had_errors = false;
 
-            // Print results in original order
+            // Print results in original order (unless --total=only)
+            let print_individual = args.total != TotalOption::Only;
             for (i, result) in results.iter().enumerate() {
                 match result {
                     Ok(stats) => {
@@ -378,7 +401,9 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
                         total.bytes += stats.bytes;
                         total.chars += stats.chars;
 
-                        print_stats(stats, args, Some(&args.files[i]));
+                        if print_individual {
+                            print_stats(stats, args, Some(&args.files[i]));
+                        }
                     }
                     Err(_) => {
                         had_errors = true;
@@ -387,8 +412,13 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
                 }
             }
 
-            // Print total line if multiple files
-            if args.files.len() > 1 {
+            // Print total line based on --total option
+            let should_print_total = match args.total {
+                TotalOption::Always | TotalOption::Only => true,
+                TotalOption::Never => false,
+                TotalOption::Auto => args.files.len() > 1,
+            };
+            if should_print_total {
                 print_total(&total, args);
             }
 
