@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
 use rayon::prelude::*;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 #[cfg(target_arch = "aarch64")]
@@ -272,7 +272,6 @@ fn run() -> Result<()> {
     } else {
         process_files(&args, locale, thread_count)?;
     }
-
     Ok(())
 }
 
@@ -363,39 +362,68 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
 }
 
 fn print_stats(stats: &FileCounts, args: &WordCountArgs, file_path: Option<&PathBuf>) {
-    if args.lines {
-        print!("{}\t", stats.lines);
-    }
-    if args.words {
-        print!("{}\t", stats.words);
-    }
-    if args.chars {
-        print!("{}\t", stats.chars);
-    }
-    if args.bytes {
-        print!("{}\t", stats.bytes);
-    }
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
 
-    match file_path {
-        Some(path) => println!("{}", path.display()),
-        None => println!(),
+    let result = (|| -> io::Result<()> {
+        if args.lines {
+            write!(handle, "{}\t", stats.lines)?;
+        }
+        if args.words {
+            write!(handle, "{}\t", stats.words)?;
+        }
+        if args.chars {
+            write!(handle, "{}\t", stats.chars)?;
+        }
+        if args.bytes {
+            write!(handle, "{}\t", stats.bytes)?;
+        }
+
+        match file_path {
+            Some(path) => writeln!(handle, "{}", path.display())?,
+            None => writeln!(handle)?,
+        }
+        Ok(())
+    })();
+    // Exit silently on broken pipe
+    if let Err(e) = result {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        // For other errors, print and exit with error
+        eprintln!("wc-rs: write error: {}", e);
+        std::process::exit(1);
     }
 }
 
 fn print_total(stats: &FileCounts, args: &WordCountArgs) {
-    if args.lines {
-        print!("{}\t", stats.lines);
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+
+    let result = (|| -> io::Result<()> {
+        if args.lines {
+            write!(handle, "{}\t", stats.lines)?;
+        }
+        if args.words {
+            write!(handle, "{}\t", stats.words)?;
+        }
+        if args.chars {
+            write!(handle, "{}\t", stats.chars)?;
+        }
+        if args.bytes {
+            write!(handle, "{}\t", stats.bytes)?;
+        }
+        writeln!(handle, "total")?;
+        Ok(())
+    })();
+    // Exit silently on broken pipe
+    if let Err(e) = result {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("wc-rs: write error: {}", e);
+        std::process::exit(1);
     }
-    if args.words {
-        print!("{}\t", stats.words);
-    }
-    if args.chars {
-        print!("{}\t", stats.chars);
-    }
-    if args.bytes {
-        print!("{}\t", stats.bytes);
-    }
-    println!("total");
 }
 
 fn read_stdin() -> Result<Vec<u8>> {
