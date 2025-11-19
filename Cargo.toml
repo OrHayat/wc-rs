@@ -2,6 +2,11 @@
 name = "wc-rs"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "A fast, SIMD-optimized word count utility"
+repository = "https://github.com/orhayat/wc-rs"
+keywords = ["cli", "wc", "simd", "text", "word-count"]
+categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
 anyhow = "1.0.100"
