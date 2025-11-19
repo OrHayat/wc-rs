@@ -236,6 +236,43 @@ pub mod tests {
         LocaleEncoding::Utf8,
         counts(0, 2, 36, 36)
     )]
+    // SVE chunk boundary tests (SVE vectors: 128, 256, 512, 1024, 2048 bits = 16, 32, 64, 128, 256 bytes)
+    // 3-byte UTF-8 em-space at 32-byte boundary: 29 ASCII + em-space (E2 80 83) + 5 ASCII
+    #[case::chunk_boundary_32_3byte_split(
+        "12345678901234567890123456789\u{2003}world",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 35, 37)
+    )]
+    // 4-byte UTF-8 at 32-byte boundary: 28 ASCII + 💯 (F0 9F 92 AF) + space + 4 ASCII
+    #[case::chunk_boundary_32_4byte_split(
+        "1234567890123456789012345678💯 test",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 34, 37)
+    )]
+    // 3-byte UTF-8 em-space at 64-byte boundary: 61 ASCII + em-space + 5 ASCII
+    #[case::chunk_boundary_64_3byte_split(
+        "1234567890123456789012345678901234567890123456789012345678901\u{2003}world",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 67, 69)
+    )]
+    // 4-byte UTF-8 at 64-byte boundary: 60 ASCII + 💯 + space + 4 ASCII
+    #[case::chunk_boundary_64_4byte_split(
+        "123456789012345678901234567890123456789012345678901234567890💯 test",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 66, 69)
+    )]
+    // 3-byte UTF-8 em-space at 128-byte boundary: 125 ASCII + em-space + 5 ASCII
+    #[case::chunk_boundary_128_3byte_split(
+        "12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345\u{2003}world",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 131, 133)
+    )]
+    // 4-byte UTF-8 at 128-byte boundary: 124 ASCII + 💯 + space + 4 ASCII
+    #[case::chunk_boundary_128_4byte_split(
+        "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234💯 test",
+        LocaleEncoding::Utf8,
+        counts(0, 2, 130, 133)
+    )]
     // Zero-width and special Unicode characters
     // IMPORTANT: Zero-width chars (U+200B, U+200C, U+200D, U+2060) are Unicode category Cf (Format)
     // They are NOT whitespace per char.is_whitespace(), so they DON'T split words!
