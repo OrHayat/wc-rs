@@ -345,49 +345,54 @@ static inline size_t sve_count_utf8_chars(svbool_t pg, svuint8_t chunk) {
     return svcntp_b8(pg, is_not_continuation);
 }
 
-// Count word starts in SVE vector
-// A word start is: current byte is not whitespace AND previous byte was whitespace
-// This is a simplified version - extract to array and process
+// Count word starts in SVE vector using bit manipulation (mirrors NEON approach)
+// A word start is: current byte is NOT whitespace AND previous byte WAS whitespace
+//
+// NEON equivalent (from wc_arm64.rs):
+//   let not_ws = !ws_mask;
+//   let prev_was_ws = (ws_mask << 1) | carry;
+//   let word_starts = not_ws & prev_was_ws;
+//   let count = word_starts.count_ones();
+//
+// SVE version uses svinsr_n_u8 for the shift+insert operation
 static inline size_t sve_count_words(svbool_t pg, svuint8_t chunk, bool *seen_space) {
+    // Step 1: Detect whitespace bytes
+    // Whitespace = space (0x20) OR range [0x09-0x0D] (tab, LF, VT, FF, CR)
     svuint8_t ws_min = svdup_n_u8(0x09);
     svuint8_t ws_max = svdup_n_u8(0x0D);
     svuint8_t space = svdup_n_u8(0x20);
 
-    // Detect whitespace
     svbool_t in_range = svand_b_z(pg,
                                    svcmpge_u8(pg, chunk, ws_min),
                                    svcmple_u8(pg, chunk, ws_max));
     svbool_t is_space = svcmpeq_u8(pg, chunk, space);
     svbool_t is_ws = svorr_b_z(pg, in_range, is_space);
 
-    // Store whitespace mask to array for processing
-    // SVE vector length ranges from 128 to 2048 bits (in 128-bit increments)
-    // Maximum: 2048 bits = 256 bytes
-    // Reference: https://developer.arm.com/documentation/102476/0100/Introducing-SVE
-    uint8_t ws_array[256];
-    svuint8_t ones_vec = svdup_n_u8(1);
-    svuint8_t ws_mask_vec = svsel_u8(is_ws, ones_vec, svdup_n_u8(0));
-    svst1_u8(pg, ws_array, ws_mask_vec);
+    // Step 2: Convert predicates to byte masks (0 or 1)
+    // This allows us to use integer bit manipulation like NEON
+    svuint8_t ones = svdup_n_u8(1);
+    svuint8_t zeros = svdup_n_u8(0);
+    svuint8_t ws_mask = svsel_u8(is_ws, ones, zeros);     // ws_mask[i] = is_ws[i] ? 1 : 0
+    svuint8_t not_ws = svsel_u8(is_ws, zeros, ones);      // not_ws[i] = !is_ws[i]
 
-    // Count word starts using scalar logic
-    size_t active_count = svcntp_b8(pg, pg);
-    size_t word_count = 0;
-    bool prev_was_ws = *seen_space;
+    // Step 3: Create "previous was whitespace" mask
+    // svinsr_n_u8 inserts value at position 0 and shifts all bytes up by 1
+    // Result: [carry, ws[0], ws[1], ..., ws[n-2]]
+    // This is equivalent to NEON's: (ws_mask << 1) | carry
+    svuint8_t prev_was_ws = svinsr_n_u8(ws_mask, *seen_space ? 1 : 0);
 
-    for (size_t i = 0; i < active_count; i++) {
-        bool is_ws_byte = (ws_array[i] != 0);
-        bool is_not_ws = !is_ws_byte;
+    // Step 4: Word start = NOT whitespace AND previous WAS whitespace
+    // word_start[i] = not_ws[i] & prev_was_ws[i]
+    svuint8_t word_start_mask = svand_u8_z(pg, not_ws, prev_was_ws);
 
-        // Word start: not whitespace AND previous was whitespace
-        if (is_not_ws && prev_was_ws) {
-            word_count++;
-        }
+    // Step 5: Count word starts (equivalent to popcount)
+    svbool_t word_starts = svcmpgt_u8(pg, word_start_mask, zeros);
+    size_t word_count = svcntp_b8(pg, word_starts);
 
-        prev_was_ws = is_ws_byte;
-    }
-
-    // Update state
-    *seen_space = prev_was_ws;
+    // Step 6: Update carry for next chunk
+    // Save last byte's whitespace state
+    uint8_t last_ws = svlastb_u8(pg, ws_mask);
+    *seen_space = (last_ws != 0);
 
     return word_count;
 }
