@@ -348,7 +348,7 @@ static inline size_t sve_count_utf8_chars(svbool_t pg, svuint8_t chunk) {
 // Count word starts in SVE vector
 // A word start is: current byte is not whitespace AND previous byte was whitespace
 // This is a simplified version - extract to array and process
-static inline size_t sve_count_words(svbool_t pg, svuint8_t chunk, bool *seen_space, bool *last_is_ws) {
+static inline size_t sve_count_words(svbool_t pg, svuint8_t chunk, bool *seen_space) {
     svuint8_t ws_min = svdup_n_u8(0x09);
     svuint8_t ws_max = svdup_n_u8(0x0D);
     svuint8_t space = svdup_n_u8(0x20);
@@ -387,8 +387,7 @@ static inline size_t sve_count_words(svbool_t pg, svuint8_t chunk, bool *seen_sp
     }
 
     // Update state
-    *last_is_ws = prev_was_ws;
-    *seen_space = *last_is_ws;
+    *seen_space = prev_was_ws;
 
     return word_count;
 }
@@ -450,7 +449,6 @@ FileCounts count_text_sve_c_unchecked(
 
     // Word counting state
     bool seen_space = true;
-    bool last_is_ws = true;
 
     // UTF-8 carry buffer for incomplete sequences at chunk boundaries
     uint8_t carry[4] = {0};
@@ -483,7 +481,7 @@ FileCounts count_text_sve_c_unchecked(
             }
 
             // Count words
-            result.words += sve_count_words(pg, chunk, &seen_space, &last_is_ws);
+            result.words += sve_count_words(pg, chunk, &seen_space);
         } else {
             // Fallback: scalar processing for non-ASCII UTF-8 with carry buffer
             seen_space = process_utf8_with_carry(
@@ -513,7 +511,7 @@ FileCounts count_text_sve_c_unchecked(
                 result.chars += remaining;
             }
 
-            result.words += sve_count_words(pg, chunk, &seen_space, &last_is_ws);
+            result.words += sve_count_words(pg, chunk, &seen_space);
         } else {
             // Scalar fallback for remainder with carry buffer
             seen_space = process_utf8_with_carry(
