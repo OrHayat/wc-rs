@@ -11,7 +11,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <arm_sve.h>
-#include "../vendor/utf8.h"
 
 // Platform-specific headers for CPU detection
 #if defined(__linux__)
@@ -87,11 +86,79 @@ static inline bool cpu_supports_sve(void) {
 }
 
 // ============================================================================
+// UTF-8 Decoding with Validation
+// ============================================================================
+
+// Decode a UTF-8 character with full validation
+// Returns number of bytes consumed (1-4), or 0 if invalid
+// On success, writes codepoint to *out_codepoint
+static inline size_t decode_utf8_validated(
+    const uint8_t* data,
+    size_t len,
+    uint32_t* out_codepoint
+) {
+    if (len == 0) return 0;
+
+    uint8_t first = data[0];
+
+    // ASCII (0xxxxxxx)
+    if (first < 0x80) {
+        *out_codepoint = first;
+        return 1;
+    }
+
+    // Determine expected length and validate first byte
+    size_t seq_len;
+    uint32_t codepoint;
+
+    if ((first & 0xE0) == 0xC0) {
+        // 2-byte sequence (110xxxxx)
+        if (first < 0xC2) return 0;  // Overlong (0xC0, 0xC1)
+        seq_len = 2;
+        codepoint = first & 0x1F;
+    } else if ((first & 0xF0) == 0xE0) {
+        // 3-byte sequence (1110xxxx)
+        seq_len = 3;
+        codepoint = first & 0x0F;
+    } else if ((first & 0xF8) == 0xF0) {
+        // 4-byte sequence (11110xxx)
+        if (first > 0xF4) return 0;  // Beyond Unicode range
+        seq_len = 4;
+        codepoint = first & 0x07;
+    } else {
+        // Invalid: lone continuation (10xxxxxx) or invalid start (11111xxx)
+        return 0;
+    }
+
+    // Check we have enough bytes
+    if (len < seq_len) return 0;
+
+    // Validate and decode continuation bytes (must be 10xxxxxx)
+    for (size_t i = 1; i < seq_len; i++) {
+        uint8_t cont = data[i];
+        if ((cont & 0xC0) != 0x80) return 0;
+        codepoint = (codepoint << 6) | (cont & 0x3F);
+    }
+
+    // Check for overlong encodings
+    if (seq_len == 2 && codepoint < 0x80) return 0;
+    if (seq_len == 3 && codepoint < 0x800) return 0;
+    if (seq_len == 4 && codepoint < 0x10000) return 0;
+
+    // Check valid Unicode range
+    if (codepoint > 0x10FFFF) return 0;
+    if (codepoint >= 0xD800 && codepoint <= 0xDFFF) return 0;  // Surrogates
+
+    *out_codepoint = codepoint;
+    return seq_len;
+}
+
+// ============================================================================
 // Unicode Whitespace Detection
 // ============================================================================
 
 // Forward declaration
-static inline bool is_unicode_whitespace(utf8_int32_t codepoint);
+static inline bool is_unicode_whitespace(uint32_t codepoint);
 
 // ============================================================================
 // UTF-8 Boundary Detection
@@ -103,39 +170,52 @@ static inline size_t detect_incomplete_utf8_suffix(const uint8_t* data, size_t l
     if (len == 0) return 0;
 
     // Scan backwards from end looking for UTF-8 start byte
-    for (size_t i = 0; i < 4 && i < len; i++) {
+    // Need to scan up to 4 bytes to find a potential start byte
+    size_t scan_limit = (len < 4) ? len : 4;
+    size_t cont_count = 0;
+
+    for (size_t i = 0; i < scan_limit; i++) {
         size_t pos = len - 1 - i;
         uint8_t byte = data[pos];
-        size_t bytes_from_here = len - pos;
 
         // ASCII (0xxxxxxx)
         if ((byte & 0x80) == 0) {
             return 0; // Complete
         }
+        // Continuation byte (10xxxxxx) - count and keep looking
+        else if ((byte & 0xC0) == 0x80) {
+            cont_count++;
+            continue;
+        }
         // 2-byte start (110xxxxx)
         else if ((byte & 0xE0) == 0xC0) {
-            return (bytes_from_here < 2) ? bytes_from_here : 0;
+            // Check if sequence is complete
+            size_t needed = 2;
+            size_t have = cont_count + 1;
+            return (have < needed) ? have : 0;
         }
         // 3-byte start (1110xxxx)
         else if ((byte & 0xF0) == 0xE0) {
-            return (bytes_from_here < 3) ? bytes_from_here : 0;
+            size_t needed = 3;
+            size_t have = cont_count + 1;
+            return (have < needed) ? have : 0;
         }
         // 4-byte start (11110xxx)
         else if ((byte & 0xF8) == 0xF0) {
-            return (bytes_from_here < 4) ? bytes_from_here : 0;
+            size_t needed = 4;
+            size_t have = cont_count + 1;
+            return (have < needed) ? have : 0;
         }
-        // Continuation byte (10xxxxxx) - keep looking
-        else if ((byte & 0xC0) == 0x80) {
-            continue;
-        }
-        // Invalid - treat as complete
+        // Invalid start byte - treat as complete
         else {
             return 0;
         }
     }
 
-    // All continuation bytes - incomplete
-    return (len > 4) ? 4 : len;
+    // All continuation bytes without finding start
+    // If we found 4+ continuations, they can't be valid (max is 3 for 4-byte seq)
+    // Return 0 and let decoder handle them as invalid
+    return (cont_count < 4) ? cont_count : 0;
 }
 
 // Process UTF-8 data with carry buffer for incomplete sequences
@@ -167,16 +247,19 @@ static bool process_utf8_with_carry(
     size_t process_len = buffer_len - incomplete;
 
     // Process complete characters
-    void* ptr = (void*)buffer;
-    void* end = (void*)(buffer + process_len);
+    size_t pos = 0;
 
-    while (ptr < end) {
-        utf8_int32_t codepoint;
-        void* next_ptr = utf8codepoint(ptr, &codepoint);
+    while (pos < process_len) {
+        uint32_t codepoint;
+        size_t bytes_consumed = decode_utf8_validated(
+            buffer + pos,
+            process_len - pos,
+            &codepoint
+        );
 
-        if (next_ptr == ptr || next_ptr > end) {
-            // Invalid UTF-8 - skip byte
-            ptr = (uint8_t*)ptr + 1;
+        if (bytes_consumed == 0) {
+            // Invalid UTF-8 - skip one byte
+            pos++;
             continue;
         }
 
@@ -192,7 +275,7 @@ static bool process_utf8_with_carry(
         }
         seen_space = is_ws;
 
-        ptr = next_ptr;
+        pos += bytes_consumed;
     }
 
     // Save incomplete bytes to carry
@@ -206,7 +289,7 @@ static bool process_utf8_with_carry(
 
 // Check if a Unicode codepoint is whitespace
 // Matches Rust's char::is_whitespace() behavior
-static inline bool is_unicode_whitespace(utf8_int32_t codepoint) {
+static inline bool is_unicode_whitespace(uint32_t codepoint) {
     // ASCII whitespace (fast path)
     if (codepoint == 0x20 || (codepoint >= 0x09 && codepoint <= 0x0D)) {
         return true;

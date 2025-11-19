@@ -38,51 +38,14 @@ mod sve_ffi {
 }
 
 pub(crate) unsafe fn count_text_sve(content: &[u8], locale: LocaleEncoding) -> FileCounts {
-    // SVE implementation now matches NEON pattern:
-    // - Process chunks in Rust with carry buffer
-    // - Use process_scalar_with_carry for non-ASCII (handles Unicode whitespace)
-    // - Call C function only for complete buffer processing (C handles its own chunking)
-
-    // For now, since restructuring C is complex, call C for ASCII-only chunks
-    // and Rust scalar for non-ASCII chunks with carry buffer
-
-    // Quick check: if all ASCII, use C directly
-    let has_non_ascii = content.iter().any(|&b| b >= 0x80);
-
-    if !has_non_ascii && locale == LocaleEncoding::Utf8 {
-        // Pure ASCII - safe to use C implementation
-        let locale_byte = match locale {
-            LocaleEncoding::SingleByte => 0,
-            LocaleEncoding::Utf8 => 1,
-        };
-        return unsafe {
-            sve_ffi::count_text_sve_c_unchecked(content.as_ptr(), content.len(), locale_byte)
-        };
-    }
-
-    // Has non-ASCII or C locale - use Rust scalar with carry buffer
-    // This handles incomplete UTF-8 correctly
-    let mut result_acc = FileCounts {
-        lines: 0,
-        words: 0,
-        chars: 0,
-        bytes: content.len(),
+    let locale_byte = match locale {
+        LocaleEncoding::SingleByte => 0,
+        LocaleEncoding::Utf8 => 1,
     };
-    let mut seen_space = true;
-    let mut carry: Vec<u8> = Vec::with_capacity(3);
 
-    // Process in chunks to detect incomplete UTF-8
-    const CHUNK_SIZE: usize = 256; // SVE max vector size
-    for chunk in content.chunks(CHUNK_SIZE) {
-        seen_space = process_scalar_with_carry(chunk, &mut carry, &mut result_acc, seen_space, locale);
+    unsafe {
+        sve_ffi::count_text_sve_c_unchecked(content.as_ptr(), content.len(), locale_byte)
     }
-
-    // Process any remaining carry
-    if !carry.is_empty() {
-        process_scalar_with_carry(&[], &mut carry, &mut result_acc, seen_space, locale);
-    }
-
-    result_acc
 }
 
 // ============================================================================
