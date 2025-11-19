@@ -90,6 +90,120 @@ static inline bool cpu_supports_sve(void) {
 // Unicode Whitespace Detection
 // ============================================================================
 
+// Forward declaration
+static inline bool is_unicode_whitespace(utf8_int32_t codepoint);
+
+// ============================================================================
+// UTF-8 Boundary Detection
+// ============================================================================
+
+// Detect incomplete UTF-8 sequence at the end of a buffer.
+// Returns the number of bytes (0-3) that form an incomplete sequence.
+static inline size_t detect_incomplete_utf8_suffix(const uint8_t* data, size_t len) {
+    if (len == 0) return 0;
+
+    // Scan backwards from end looking for UTF-8 start byte
+    for (size_t i = 0; i < 4 && i < len; i++) {
+        size_t pos = len - 1 - i;
+        uint8_t byte = data[pos];
+        size_t bytes_from_here = len - pos;
+
+        // ASCII (0xxxxxxx)
+        if ((byte & 0x80) == 0) {
+            return 0; // Complete
+        }
+        // 2-byte start (110xxxxx)
+        else if ((byte & 0xE0) == 0xC0) {
+            return (bytes_from_here < 2) ? bytes_from_here : 0;
+        }
+        // 3-byte start (1110xxxx)
+        else if ((byte & 0xF0) == 0xE0) {
+            return (bytes_from_here < 3) ? bytes_from_here : 0;
+        }
+        // 4-byte start (11110xxx)
+        else if ((byte & 0xF8) == 0xF0) {
+            return (bytes_from_here < 4) ? bytes_from_here : 0;
+        }
+        // Continuation byte (10xxxxxx) - keep looking
+        else if ((byte & 0xC0) == 0x80) {
+            continue;
+        }
+        // Invalid - treat as complete
+        else {
+            return 0;
+        }
+    }
+
+    // All continuation bytes - incomplete
+    return (len > 4) ? 4 : len;
+}
+
+// Process UTF-8 data with carry buffer for incomplete sequences
+// Returns new seen_space state
+static bool process_utf8_with_carry(
+    const uint8_t* data,
+    size_t len,
+    uint8_t* carry,
+    size_t* carry_len,
+    FileCounts* result,
+    bool seen_space
+) {
+    // Combine carry + new data into working buffer
+    uint8_t buffer[260]; // Max: 3 carry + 256 chunk + 1 safety
+    size_t buffer_len = 0;
+
+    // Copy carry bytes
+    for (size_t i = 0; i < *carry_len; i++) {
+        buffer[buffer_len++] = carry[i];
+    }
+
+    // Copy new data
+    for (size_t i = 0; i < len && buffer_len < sizeof(buffer); i++) {
+        buffer[buffer_len++] = data[i];
+    }
+
+    // Detect incomplete UTF-8 at end
+    size_t incomplete = detect_incomplete_utf8_suffix(buffer, buffer_len);
+    size_t process_len = buffer_len - incomplete;
+
+    // Process complete characters
+    void* ptr = (void*)buffer;
+    void* end = (void*)(buffer + process_len);
+
+    while (ptr < end) {
+        utf8_int32_t codepoint;
+        void* next_ptr = utf8codepoint(ptr, &codepoint);
+
+        if (next_ptr == ptr || next_ptr > end) {
+            // Invalid UTF-8 - skip byte
+            ptr = (uint8_t*)ptr + 1;
+            continue;
+        }
+
+        result->chars++;
+
+        if (codepoint == '\n') {
+            result->lines++;
+        }
+
+        bool is_ws = is_unicode_whitespace(codepoint);
+        if (!is_ws && seen_space) {
+            result->words++;
+        }
+        seen_space = is_ws;
+
+        ptr = next_ptr;
+    }
+
+    // Save incomplete bytes to carry
+    *carry_len = incomplete;
+    for (size_t i = 0; i < incomplete; i++) {
+        carry[i] = buffer[process_len + i];
+    }
+
+    return seen_space;
+}
+
 // Check if a Unicode codepoint is whitespace
 // Matches Rust's char::is_whitespace() behavior
 static inline bool is_unicode_whitespace(utf8_int32_t codepoint) {
@@ -255,6 +369,10 @@ FileCounts count_text_sve_c_unchecked(
     bool seen_space = true;
     bool last_is_ws = true;
 
+    // UTF-8 carry buffer for incomplete sequences at chunk boundaries
+    uint8_t carry[4] = {0};
+    size_t carry_len = 0;
+
     size_t i = 0;
 
     // Process full vectors
@@ -284,40 +402,10 @@ FileCounts count_text_sve_c_unchecked(
             // Count words
             result.words += sve_count_words(pg, chunk, &seen_space, &last_is_ws);
         } else {
-            // Fallback: scalar processing for non-ASCII UTF-8
-            // Decode UTF-8 and check Unicode whitespace
-            const uint8_t *chunk_start = content + i;
-            const uint8_t *chunk_end = chunk_start + vl;
-            void *ptr = (void *)chunk_start;
-
-            while (ptr < (void *)chunk_end) {
-                utf8_int32_t codepoint;
-                void *next_ptr = utf8codepoint(ptr, &codepoint);
-
-                // Check if we successfully decoded
-                if (next_ptr == ptr || next_ptr > (void *)chunk_end) {
-                    // Invalid UTF-8 or would read past end - skip this byte
-                    ptr = (uint8_t *)ptr + 1;
-                    continue;
-                }
-
-                // Count character
-                result.chars++;
-
-                // Count newlines
-                if (codepoint == '\n') {
-                    result.lines++;
-                }
-
-                // Word counting with Unicode whitespace support
-                bool is_ws = is_unicode_whitespace(codepoint);
-                if (!is_ws && seen_space) {
-                    result.words++;
-                }
-                seen_space = is_ws;
-
-                ptr = next_ptr;
-            }
+            // Fallback: scalar processing for non-ASCII UTF-8 with carry buffer
+            seen_space = process_utf8_with_carry(
+                content + i, vl, carry, &carry_len, &result, seen_space
+            );
         }
 
         i += vl;
@@ -344,40 +432,17 @@ FileCounts count_text_sve_c_unchecked(
 
             result.words += sve_count_words(pg, chunk, &seen_space, &last_is_ws);
         } else {
-            // Scalar fallback for remainder with UTF-8 decoding
-            const uint8_t *chunk_start = content + i;
-            const uint8_t *chunk_end = chunk_start + remaining;
-            void *ptr = (void *)chunk_start;
-
-            while (ptr < (void *)chunk_end) {
-                utf8_int32_t codepoint;
-                void *next_ptr = utf8codepoint(ptr, &codepoint);
-
-                // Check if we successfully decoded
-                if (next_ptr == ptr || next_ptr > (void *)chunk_end) {
-                    // Invalid UTF-8 or would read past end - skip this byte
-                    ptr = (uint8_t *)ptr + 1;
-                    continue;
-                }
-
-                // Count character
-                result.chars++;
-
-                // Count newlines
-                if (codepoint == '\n') {
-                    result.lines++;
-                }
-
-                // Word counting with Unicode whitespace support
-                bool is_ws = is_unicode_whitespace(codepoint);
-                if (!is_ws && seen_space) {
-                    result.words++;
-                }
-                seen_space = is_ws;
-
-                ptr = next_ptr;
-            }
+            // Scalar fallback for remainder with carry buffer
+            seen_space = process_utf8_with_carry(
+                content + i, remaining, carry, &carry_len, &result, seen_space
+            );
         }
+    }
+
+    // Flush any remaining carry (incomplete UTF-8 at end of input)
+    if (carry_len > 0) {
+        // Process carry with empty new data to flush
+        process_utf8_with_carry(NULL, 0, carry, &carry_len, &result, seen_space);
     }
 
     return result;

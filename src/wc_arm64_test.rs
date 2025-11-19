@@ -402,4 +402,74 @@ mod tests {
             }
         }
     }
+
+    // ====================================================================
+    // UTF-8 Chunk Boundary Tests
+    // ====================================================================
+
+    /// Helper: build content with UTF-8 char at specific byte offset
+    fn build_boundary_content(padding: usize, utf8_char: &str) -> Vec<u8> {
+        let mut content = vec![b'a'; padding];
+        content.extend_from_slice(utf8_char.as_bytes());
+        content
+    }
+
+    /// Test UTF-8 at SVE chunk boundaries (Rust wrapper - should pass)
+    #[rstest]
+    #[case::three_byte_at_254(254, "中", "3-byte at 254")]
+    #[case::four_byte_at_253(253, "𐍈", "4-byte at 253")]
+    #[case::two_byte_at_255(255, "é", "2-byte at 255")]
+    #[case::three_byte_at_510(510, "中", "3-byte at 510")]
+    fn test_utf8_chunk_boundary_sve_wrapper(
+        #[case] padding: usize,
+        #[case] utf8_char: &str,
+        #[case] desc: &str,
+    ) {
+        if !std::arch::is_aarch64_feature_detected!("sve") {
+            eprintln!("SKIP: SVE not available");
+            return;
+        }
+
+        let content = build_boundary_content(padding, utf8_char);
+        let result = unsafe { crate::wc_arm64::count_text_sve(&content, LocaleEncoding::Utf8) };
+        let expected = crate::wc_default::word_count_scalar(&content, LocaleEncoding::Utf8);
+
+        assert_eq!(result, expected, "{}: wrapper should match scalar", desc);
+    }
+
+    /// Direct C FFI test - exposes boundary bug
+    mod sve_ffi_test {
+        use crate::FileCounts;
+        unsafe extern "C" {
+            pub fn count_text_sve_c_unchecked(
+                content: *const u8,
+                len: usize,
+                locale: u8,
+            ) -> FileCounts;
+        }
+    }
+
+    /// Test UTF-8 at chunk boundaries (C direct - EXPOSES BUG)
+    #[rstest]
+    #[case::three_byte_at_254(254, "中", "3-byte at 254")]
+    #[case::four_byte_at_253(253, "𐍈", "4-byte at 253")]
+    fn test_utf8_chunk_boundary_c_direct(
+        #[case] padding: usize,
+        #[case] utf8_char: &str,
+        #[case] desc: &str,
+    ) {
+        if !std::arch::is_aarch64_feature_detected!("sve") {
+            eprintln!("SKIP: SVE not available");
+            return;
+        }
+
+        let content = build_boundary_content(padding, utf8_char);
+        let result = unsafe {
+            sve_ffi_test::count_text_sve_c_unchecked(content.as_ptr(), content.len(), 1)
+        };
+        let expected = crate::wc_default::word_count_scalar(&content, LocaleEncoding::Utf8);
+
+        assert_eq!(result.chars, expected.chars,
+            "{}: C direct chars mismatch (BUG: skips boundary chars)", desc);
+    }
 }
