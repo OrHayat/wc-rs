@@ -9,7 +9,7 @@ keywords = ["cli", "wc", "simd", "text", "word-count"]
 categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
-anyhow = "1.0.100"
+thiserror = "2.0.17"
 clap = { version = "4.5.51", features = ["derive"] }
 num_cpus = "1.16.0"
 rayon = "1.11.0"

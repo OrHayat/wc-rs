@@ -1,8 +1,38 @@
-use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
 use rayon::prelude::*;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use thiserror::Error;
+
+/// Custom error type for wc-rs
+#[derive(Debug, Error)]
+pub enum WcError {
+    /// IO error with path context
+    #[error("{path}: {source}")]
+    FileRead {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Failed to read from stdin
+    #[error("failed to read from stdin: {0}")]
+    Stdin(#[source] io::Error),
+
+    /// Invalid argument combination
+    #[error("file operands cannot be combined with --files0-from")]
+    InvalidArguments,
+
+    /// One or more files failed (errors already printed)
+    #[error("")]
+    FilesProcessed,
+
+    /// Thread pool build error
+    #[error("failed to build thread pool: {0}")]
+    ThreadPool(#[source] rayon::ThreadPoolBuildError),
+}
+
+type Result<T> = std::result::Result<T, WcError>;
 
 #[cfg(target_arch = "aarch64")]
 mod wc_arm64;
@@ -220,8 +250,16 @@ struct WordCountArgs {
 }
 
 fn main() {
-    if let Err(_) = run() {
-        // Errors already printed to stderr
+    if let Err(e) = run() {
+        // Print error if it hasn't been printed already
+        match &e {
+            WcError::FilesProcessed | WcError::InvalidArguments => {
+                // Already printed
+            }
+            _ => {
+                eprintln!("wc-rs: {}", e);
+            }
+        }
         std::process::exit(1);
     }
 }
@@ -240,7 +278,7 @@ fn run() -> Result<()> {
     if let Some(ref files0_path) = args.files0_from {
         if !args.files.is_empty() {
             eprintln!("wc-rs: file operands cannot be combined with --files0-from");
-            return Err(anyhow::anyhow!("invalid arguments"));
+            return Err(WcError::InvalidArguments);
         }
         args.files = read_files0_from(files0_path)?;
     }
@@ -291,7 +329,7 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
     rayon::ThreadPoolBuilder::new()
         .num_threads(thread_count)
         .build()
-        .context("failed to build thread pool")?
+        .map_err(WcError::ThreadPool)?
         .install(|| {
             // Process files in parallel, preserving order
             // Returns Result<FileCounts> for success, or error message for failure
@@ -302,8 +340,10 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
                     let content = if file_path.to_str() == Some("-") {
                         read_stdin()
                     } else {
-                        std::fs::read(file_path)
-                            .with_context(|| format!("{}", file_path.display()))
+                        std::fs::read(file_path).map_err(|e| WcError::FileRead {
+                            path: file_path.display().to_string(),
+                            source: e,
+                        })
                     };
 
                     match content {
@@ -313,8 +353,8 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
                         }
                         Err(e) => {
                             // Print error to stderr and continue
-                            eprintln!("wc-rs: {}: {}", file_path.display(), e);
-                            Err(anyhow::anyhow!("failed to read file"))
+                            eprintln!("wc-rs: {}", e);
+                            Err(WcError::FilesProcessed)
                         }
                     }
                 })
@@ -354,7 +394,7 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
 
             // Return error if any files failed
             if had_errors {
-                Err(anyhow::anyhow!("one or more files failed to process"))
+                Err(WcError::FilesProcessed)
             } else {
                 Ok(())
             }
@@ -430,7 +470,7 @@ fn read_stdin() -> Result<Vec<u8>> {
     let mut buffer = Vec::new();
     io::stdin()
         .read_to_end(&mut buffer)
-        .context("failed to read from stdin")?;
+        .map_err(WcError::Stdin)?;
     Ok(buffer)
 }
 
@@ -441,8 +481,10 @@ fn read_files0_from(path: &PathBuf) -> Result<Vec<PathBuf>> {
         read_stdin()?
     } else {
         // Read from file
-        std::fs::read(path)
-            .with_context(|| format!("failed to read from '{}'", path.display()))?
+        std::fs::read(path).map_err(|e| WcError::FileRead {
+            path: path.display().to_string(),
+            source: e,
+        })?
     };
 
     // Split on NUL characters and convert to PathBufs
