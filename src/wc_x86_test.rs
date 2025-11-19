@@ -2,7 +2,6 @@
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod tests {
     use crate::wc_default_test::tests::{common_word_count_cases, counts};
-    use crate::wc_x86::count_text_simd;
     use crate::{FileCounts, LocaleEncoding};
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
@@ -11,13 +10,6 @@ mod tests {
     use rstest_reuse;
     use rstest_reuse::*;
 
-    // Apply the common template to test SIMD auto-detection
-    // This will run all common test cases with automatic SIMD selection
-    #[apply(common_word_count_cases)]
-    fn test_count_text_simd(input: &str, locale: LocaleEncoding, expected: FileCounts) {
-        let result = count_text_simd(input.as_bytes(), locale).expect("simd should be available on x86_64");
-        assert_eq!(result, expected);
-    }
     // Test SSE2 implementation specifically
     // SSE2 is available on all x86_64 CPUs, so we can test it directly
     #[apply(common_word_count_cases)]
