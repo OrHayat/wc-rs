@@ -85,24 +85,6 @@ pub(crate) unsafe fn count_text_sve(content: &[u8], locale: LocaleEncoding) -> F
     result_acc
 }
 
-/// Attempts SIMD-accelerated text counting on ARM64 processors.
-///
-/// Returns `Some(FileCounts)` if NEON or SVE instructions are available, `None` otherwise.
-#[cfg(target_arch = "aarch64")]
-pub fn count_text_simd(content: &[u8], locale: LocaleEncoding) -> Option<FileCounts> {
-    // Try SVE first (most powerful, 128-2048 bit vectors)
-    if std::arch::is_aarch64_feature_detected!("sve") {
-        return Some(unsafe { count_text_sve(content, locale) });
-    }
-
-    // Fall back to NEON (baseline ARM64, 128-bit vectors)
-    if std::arch::is_aarch64_feature_detected!("neon") {
-        return Some(unsafe { count_text_neon(content, locale) });
-    }
-
-    None
-}
-
 // ============================================================================
 // NEON Helper Functions - Reusable operations
 // ============================================================================

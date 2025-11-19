@@ -35,6 +35,80 @@ pub enum LocaleEncoding {
     Utf8,
 }
 
+/// SIMD implementation path used for counting
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CountingBackend {
+    /// AVX-512 with byte operations (x86_64)
+    Avx512,
+    /// AVX2 256-bit vectors (x86_64)
+    Avx2,
+    /// SSE2 128-bit vectors (x86_64)
+    Sse2,
+    /// ARM SVE scalable vectors (aarch64)
+    Sve,
+    /// ARM NEON 128-bit vectors (aarch64)
+    Neon,
+    /// Scalar fallback implementation
+    Scalar,
+}
+
+impl std::fmt::Display for CountingBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CountingBackend::Avx512 => write!(f, "AVX-512"),
+            CountingBackend::Avx2 => write!(f, "AVX2"),
+            CountingBackend::Sse2 => write!(f, "SSE2"),
+            CountingBackend::Sve => write!(f, "SVE"),
+            CountingBackend::Neon => write!(f, "NEON"),
+            CountingBackend::Scalar => write!(f, "Scalar"),
+        }
+    }
+}
+
+impl CountingBackend {
+    /// Count text statistics using this SIMD path
+    pub fn count_text(&self, content: &[u8], locale: LocaleEncoding) -> FileCounts {
+        match self {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            CountingBackend::Avx512 => unsafe { wc_x86::count_text_avx512(content, locale) },
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            CountingBackend::Avx2 => unsafe { wc_x86::count_text_avx2(content, locale) },
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            CountingBackend::Sse2 => unsafe { wc_x86::count_text_sse2(content, locale) },
+            #[cfg(target_arch = "aarch64")]
+            CountingBackend::Sve => unsafe { wc_arm64::count_text_sve(content, locale) },
+            #[cfg(target_arch = "aarch64")]
+            CountingBackend::Neon => unsafe { wc_arm64::count_text_neon(content, locale) },
+            _ => wc_default::word_count_scalar(content, locale),
+        }
+    }
+}
+
+/// Detect which SIMD path will be used at runtime
+fn detect_simd_path() -> CountingBackend {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if is_x86_feature_detected!("avx512bw") {
+            return CountingBackend::Avx512;
+        } else if is_x86_feature_detected!("avx2") {
+            return CountingBackend::Avx2;
+        } else if is_x86_feature_detected!("sse2") {
+            return CountingBackend::Sse2;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("sve") {
+            return CountingBackend::Sve;
+        } else if std::arch::is_aarch64_feature_detected!("neon") {
+            return CountingBackend::Neon;
+        }
+    }
+
+    CountingBackend::Scalar
+}
+
 /// Detect locale encoding from environment variables (LC_ALL, LC_CTYPE, LANG)
 fn detect_locale() -> LocaleEncoding {
     let locale = std::env::var("LC_ALL")
@@ -136,6 +210,10 @@ struct WordCountArgs {
     #[arg(long = "files0-from", value_name = "F", value_hint = clap::ValueHint::FilePath)]
     files0_from: Option<PathBuf>,
 
+    /// Show debug information (SIMD path used)
+    #[arg(long = "debug", action = ArgAction::SetTrue)]
+    debug: bool,
+
     /// Input files; use '-' for stdin. If empty, read from stdin.
     #[arg(value_name = "FILE", value_hint = clap::ValueHint::FilePath)]
     files: Vec<PathBuf>,
@@ -173,6 +251,22 @@ fn run() -> Result<()> {
     // Determine thread count for parallel processing
     let thread_count = determine_thread_count(args.num_threads);
 
+    // Print debug information if requested
+    if args.debug {
+        let simd_path = detect_simd_path();
+        let locale_str = match locale {
+            LocaleEncoding::SingleByte => "C/SingleByte",
+            LocaleEncoding::Utf8 => "UTF-8",
+        };
+        eprintln!(
+            "wc-rs {} | SIMD: {} | Locale: {} | Threads: {}",
+            env!("CARGO_PKG_VERSION"),
+            simd_path,
+            locale_str,
+            thread_count
+        );
+    }
+
     if args.files.is_empty() {
         process_stdin(&args, locale)?;
     } else {
@@ -184,12 +278,16 @@ fn run() -> Result<()> {
 
 fn process_stdin(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
     let content = read_stdin()?;
-    let stats = count_text(&content, locale);
+    let simd_path = detect_simd_path();
+    let stats = simd_path.count_text(&content, locale);
     print_stats(&stats, args, None);
     Ok(())
 }
 
 fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usize) -> Result<()> {
+    // Detect SIMD path once before parallel processing
+    let simd_path = detect_simd_path();
+
     // Configure rayon thread pool
     rayon::ThreadPoolBuilder::new()
         .num_threads(thread_count)
@@ -211,7 +309,7 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
 
                     match content {
                         Ok(content) => {
-                            let stats = count_text(&content, locale);
+                            let stats = simd_path.count_text(&content, locale);
                             Ok(stats)
                         }
                         Err(e) => {
@@ -341,23 +439,3 @@ fn read_files0_from(path: &PathBuf) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// Count text statistics using the fastest available method (SIMD or scalar)
-fn count_text(content: &[u8], locale: LocaleEncoding) -> FileCounts {
-    // Try SIMD first based on architecture
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        if let Some(simd_result) = wc_x86::count_text_simd(content, locale) {
-            return simd_result;
-        }
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        if let Some(simd_result) = wc_arm64::count_text_simd(content, locale) {
-            return simd_result;
-        }
-    }
-
-    // Fallback to scalar implementation
-    wc_default::word_count_scalar(content, locale)
-}
