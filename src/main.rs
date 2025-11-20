@@ -4,6 +4,9 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use thiserror::Error;
 
+// Use the library's CountingBackend (prevents external crash risk)
+use wc_rs::{CountingBackend, FileCounts, LocaleEncoding};
+
 /// Control when to print the "total" line
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
 pub enum TotalOption {
@@ -59,105 +62,6 @@ mod wc_x86;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod wc_x86_test;
 
-/// File statistics for word count operations
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FileCounts {
-    pub lines: usize,
-    pub words: usize,
-    pub bytes: usize,
-    pub chars: usize,
-}
-
-/// Locale encoding type for character handling
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LocaleEncoding {
-    /// Single-byte encoding (C/POSIX, Latin-1, ISO-8859-*) - byte-based, ASCII whitespace only
-    SingleByte,
-    /// UTF-8 locale - Unicode aware, multi-byte characters
-    Utf8,
-}
-
-/// SIMD implementation path used for counting
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CountingBackend {
-    /// AVX-512 with byte operations (x86_64)
-    Avx512,
-    /// AVX2 256-bit vectors (x86_64)
-    Avx2,
-    /// SSE2 128-bit vectors (x86_64)
-    Sse2,
-    /// ARM SVE scalable vectors (aarch64) - only available if C library compiled successfully
-    #[cfg(sve_available)]
-    Sve,
-    /// ARM NEON 128-bit vectors (aarch64)
-    Neon,
-    /// Scalar fallback implementation
-    Scalar,
-}
-
-impl std::fmt::Display for CountingBackend {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CountingBackend::Avx512 => write!(f, "AVX-512"),
-            CountingBackend::Avx2 => write!(f, "AVX2"),
-            CountingBackend::Sse2 => write!(f, "SSE2"),
-            #[cfg(sve_available)]
-            CountingBackend::Sve => write!(f, "SVE"),
-            CountingBackend::Neon => write!(f, "NEON"),
-            CountingBackend::Scalar => write!(f, "Scalar"),
-        }
-    }
-}
-
-impl CountingBackend {
-    /// Count text statistics using this SIMD path
-    pub fn count_text(&self, content: &[u8], locale: LocaleEncoding) -> FileCounts {
-        match self {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            CountingBackend::Avx512 => unsafe { wc_x86::count_text_avx512(content, locale) },
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            CountingBackend::Avx2 => unsafe { wc_x86::count_text_avx2(content, locale) },
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            CountingBackend::Sse2 => unsafe { wc_x86::count_text_sse2(content, locale) },
-            #[cfg(all(target_arch = "aarch64", sve_available))]
-            CountingBackend::Sve => unsafe { wc_arm64::count_text_sve(content, locale) },
-            #[cfg(target_arch = "aarch64")]
-            CountingBackend::Neon => unsafe { wc_arm64::count_text_neon(content, locale) },
-            _ => wc_default::word_count_scalar(content, locale),
-        }
-    }
-}
-
-/// Detect which SIMD path will be used at runtime
-fn detect_simd_path() -> CountingBackend {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        if is_x86_feature_detected!("avx512bw") {
-            return CountingBackend::Avx512;
-        } else if is_x86_feature_detected!("avx2") {
-            return CountingBackend::Avx2;
-        } else if is_x86_feature_detected!("sse2") {
-            return CountingBackend::Sse2;
-        }
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        #[cfg(sve_available)]
-        if std::arch::is_aarch64_feature_detected!("sve") {
-            return CountingBackend::Sve;
-        }
-
-        if std::arch::is_aarch64_feature_detected!("neon") {
-            return CountingBackend::Neon;
-        }
-    }
-
-    CountingBackend::Scalar
-}
-
-/// Detect locale encoding from environment variables (LC_ALL, LC_CTYPE, LANG)
 fn detect_locale() -> LocaleEncoding {
     let locale = std::env::var("LC_ALL")
         .or_else(|_| std::env::var("LC_CTYPE"))
@@ -318,7 +222,7 @@ fn run() -> Result<()> {
 
     // Print debug information if requested
     if args.debug {
-        let simd_path = detect_simd_path();
+        let simd_path = CountingBackend::detect();
         let locale_str = match locale {
             LocaleEncoding::SingleByte => "C/SingleByte",
             LocaleEncoding::Utf8 => "UTF-8",
@@ -342,7 +246,7 @@ fn run() -> Result<()> {
 
 fn process_stdin(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
     let content = read_stdin()?;
-    let simd_path = detect_simd_path();
+    let simd_path = CountingBackend::detect();
     let stats = simd_path.count_text(&content, locale);
     print_stats(&stats, args, None);
     Ok(())
@@ -350,7 +254,7 @@ fn process_stdin(args: &WordCountArgs, locale: LocaleEncoding) -> Result<()> {
 
 fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usize) -> Result<()> {
     // Detect SIMD path once before parallel processing
-    let simd_path = detect_simd_path();
+    let simd_path = CountingBackend::detect();
 
     // Configure rayon thread pool
     rayon::ThreadPoolBuilder::new()
