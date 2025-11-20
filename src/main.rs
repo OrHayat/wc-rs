@@ -50,18 +50,6 @@ pub enum WcError {
 
 type Result<T> = std::result::Result<T, WcError>;
 
-#[cfg(target_arch = "aarch64")]
-mod wc_arm64;
-#[cfg(all(test, target_arch = "aarch64"))]
-mod wc_arm64_test;
-mod wc_default;
-#[cfg(test)]
-mod wc_default_test;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-mod wc_x86;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-mod wc_x86_test;
-
 fn detect_locale() -> LocaleEncoding {
     let locale = std::env::var("LC_ALL")
         .or_else(|_| std::env::var("LC_CTYPE"))
