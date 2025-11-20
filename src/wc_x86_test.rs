@@ -628,4 +628,809 @@ mod tests {
             }
         }
     }
+
+    // ====================================================================
+    // Additional Advanced Property Tests
+    // ====================================================================
+
+    // Property: Invalid UTF-8 bytes join words (SSE2)
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_joins_words_sse2(
+            prefix in "[a-z]+",
+            invalid_byte in 0x80u8..=0xFFu8,
+            suffix in "[a-z]+"
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let mut bytes = Vec::new();
+                bytes.extend_from_slice(prefix.as_bytes());
+                bytes.push(invalid_byte);
+                bytes.extend_from_slice(suffix.as_bytes());
+
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SSE2: Invalid UTF-8 byte 0x{:02X} should join words, got {} words", invalid_byte, result.words);
+
+                let expected_chars = prefix.chars().count() + suffix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SSE2: Invalid UTF-8: chars should be {} (prefix + suffix), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_joins_words_avx2(
+            prefix in "[a-z]+",
+            invalid_byte in 0x80u8..=0xFFu8,
+            suffix in "[a-z]+"
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let mut bytes = Vec::new();
+                bytes.extend_from_slice(prefix.as_bytes());
+                bytes.push(invalid_byte);
+                bytes.extend_from_slice(suffix.as_bytes());
+
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX2: Invalid UTF-8 byte 0x{:02X} should join words, got {} words", invalid_byte, result.words);
+
+                let expected_chars = prefix.chars().count() + suffix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX2: Invalid UTF-8: chars should be {} (prefix + suffix), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_joins_words_avx512(
+            prefix in "[a-z]+",
+            invalid_byte in 0x80u8..=0xFFu8,
+            suffix in "[a-z]+"
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let mut bytes = Vec::new();
+                bytes.extend_from_slice(prefix.as_bytes());
+                bytes.push(invalid_byte);
+                bytes.extend_from_slice(suffix.as_bytes());
+
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX512: Invalid UTF-8 byte 0x{:02X} should join words, got {} words", invalid_byte, result.words);
+
+                let expected_chars = prefix.chars().count() + suffix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX512: Invalid UTF-8: chars should be {} (prefix + suffix), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: Lone continuation bytes don't form words (SSE2)
+    proptest! {
+        #[test]
+        fn prop_lone_continuation_bytes_sse2(
+            continuation_byte in 0x80u8..=0xBFu8,
+            count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let bytes = vec![continuation_byte; count];
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 0,
+                    "SSE2: Lone continuation bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.chars, 0,
+                    "SSE2: Lone continuation bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lone_continuation_bytes_avx2(
+            continuation_byte in 0x80u8..=0xBFu8,
+            count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let bytes = vec![continuation_byte; count];
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 0,
+                    "AVX2: Lone continuation bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.chars, 0,
+                    "AVX2: Lone continuation bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lone_continuation_bytes_avx512(
+            continuation_byte in 0x80u8..=0xBFu8,
+            count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let bytes = vec![continuation_byte; count];
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 0,
+                    "AVX512: Lone continuation bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.chars, 0,
+                    "AVX512: Lone continuation bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    // Property: Truncated UTF-8 sequences at end (SSE2)
+    proptest! {
+        #[test]
+        fn prop_truncated_sequences_at_end_sse2(
+            prefix in "[a-z]{0,20}",
+            start_byte in prop::sample::select(vec![
+                0xC2u8, 0xC3u8,  // 2-byte starts
+                0xE0u8, 0xE1u8,  // 3-byte starts
+                0xF0u8, 0xF1u8,  // 4-byte starts
+            ])
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let mut bytes = Vec::from(prefix.as_bytes());
+                bytes.push(start_byte);
+
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.bytes, bytes.len());
+
+                let expected_chars = prefix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SSE2: Chars should be {} (prefix only), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_truncated_sequences_at_end_avx2(
+            prefix in "[a-z]{0,20}",
+            start_byte in prop::sample::select(vec![
+                0xC2u8, 0xC3u8,  // 2-byte starts
+                0xE0u8, 0xE1u8,  // 3-byte starts
+                0xF0u8, 0xF1u8,  // 4-byte starts
+            ])
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let mut bytes = Vec::from(prefix.as_bytes());
+                bytes.push(start_byte);
+
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.bytes, bytes.len());
+
+                let expected_chars = prefix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX2: Chars should be {} (prefix only), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_truncated_sequences_at_end_avx512(
+            prefix in "[a-z]{0,20}",
+            start_byte in prop::sample::select(vec![
+                0xC2u8, 0xC3u8,  // 2-byte starts
+                0xE0u8, 0xE1u8,  // 3-byte starts
+                0xF0u8, 0xF1u8,  // 4-byte starts
+            ])
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let mut bytes = Vec::from(prefix.as_bytes());
+                bytes.push(start_byte);
+
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.bytes, bytes.len());
+
+                let expected_chars = prefix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX512: Chars should be {} (prefix only), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: Invalid bytes don't increment line count (SSE2)
+    proptest! {
+        #[test]
+        fn prop_invalid_bytes_no_lines_sse2(
+            invalid_bytes in prop_vec(0x80u8..=0xFFu8, 1..50)
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(&invalid_bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.lines, 0,
+                    "SSE2: Invalid bytes without \\n should have 0 lines, got {}", result.lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_bytes_no_lines_avx2(
+            invalid_bytes in prop_vec(0x80u8..=0xFFu8, 1..50)
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(&invalid_bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.lines, 0,
+                    "AVX2: Invalid bytes without \\n should have 0 lines, got {}", result.lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_bytes_no_lines_avx512(
+            invalid_bytes in prop_vec(0x80u8..=0xFFu8, 1..50)
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let result = unsafe { crate::wc_x86::count_text_avx512(&invalid_bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.lines, 0,
+                    "AVX512: Invalid bytes without \\n should have 0 lines, got {}", result.lines);
+            }
+        }
+    }
+
+    // Property: Mix of valid ASCII and invalid bytes (SSE2)
+    proptest! {
+        #[test]
+        fn prop_mixed_ascii_invalid_sse2(
+            valid in "[a-z]{1,20}",
+            invalid_count in 1usize..5
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let mut bytes = Vec::from(valid.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SSE2: Valid + invalid should form 1 word, got {}", result.words);
+
+                prop_assert_eq!(result.chars, valid.len(),
+                    "SSE2: Chars should be {} (valid only), got {}", valid.len(), result.chars);
+
+                prop_assert_eq!(result.bytes, valid.len() + invalid_count);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_mixed_ascii_invalid_avx2(
+            valid in "[a-z]{1,20}",
+            invalid_count in 1usize..5
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let mut bytes = Vec::from(valid.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX2: Valid + invalid should form 1 word, got {}", result.words);
+
+                prop_assert_eq!(result.chars, valid.len(),
+                    "AVX2: Chars should be {} (valid only), got {}", valid.len(), result.chars);
+
+                prop_assert_eq!(result.bytes, valid.len() + invalid_count);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_mixed_ascii_invalid_avx512(
+            valid in "[a-z]{1,20}",
+            invalid_count in 1usize..5
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let mut bytes = Vec::from(valid.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX512: Valid + invalid should form 1 word, got {}", result.words);
+
+                prop_assert_eq!(result.chars, valid.len(),
+                    "AVX512: Chars should be {} (valid only), got {}", valid.len(), result.chars);
+
+                prop_assert_eq!(result.bytes, valid.len() + invalid_count);
+            }
+        }
+    }
+
+    // Property: Invalid bytes with newlines (SSE2)
+    proptest! {
+        #[test]
+        fn prop_invalid_with_newlines_sse2(
+            lines in prop::collection::vec("[a-z]{0,10}", 1..10)
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let mut bytes = Vec::new();
+                for (i, line) in lines.iter().enumerate() {
+                    bytes.extend_from_slice(line.as_bytes());
+                    bytes.push(0xFF);
+                    if i < lines.len() - 1 {
+                        bytes.push(b'\n');
+                    }
+                }
+
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                let expected_lines = lines.len() - 1;
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SSE2: Lines should be {}, got {}", expected_lines, result.lines);
+
+                let total_ascii: usize = lines.iter().map(|s| s.len()).sum();
+                let expected_chars = total_ascii + expected_lines;
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SSE2: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_with_newlines_avx2(
+            lines in prop::collection::vec("[a-z]{0,10}", 1..10)
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let mut bytes = Vec::new();
+                for (i, line) in lines.iter().enumerate() {
+                    bytes.extend_from_slice(line.as_bytes());
+                    bytes.push(0xFF);
+                    if i < lines.len() - 1 {
+                        bytes.push(b'\n');
+                    }
+                }
+
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                let expected_lines = lines.len() - 1;
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX2: Lines should be {}, got {}", expected_lines, result.lines);
+
+                let total_ascii: usize = lines.iter().map(|s| s.len()).sum();
+                let expected_chars = total_ascii + expected_lines;
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX2: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_with_newlines_avx512(
+            lines in prop::collection::vec("[a-z]{0,10}", 1..10)
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let mut bytes = Vec::new();
+                for (i, line) in lines.iter().enumerate() {
+                    bytes.extend_from_slice(line.as_bytes());
+                    bytes.push(0xFF);
+                    if i < lines.len() - 1 {
+                        bytes.push(b'\n');
+                    }
+                }
+
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                let expected_lines = lines.len() - 1;
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX512: Lines should be {}, got {}", expected_lines, result.lines);
+
+                let total_ascii: usize = lines.iter().map(|s| s.len()).sum();
+                let expected_chars = total_ascii + expected_lines;
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX512: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: High invalid start bytes (0xF5-0xFF) (SSE2)
+    proptest! {
+        #[test]
+        fn prop_high_invalid_start_bytes_sse2(
+            invalid_byte in 0xF5u8..=0xFFu8,
+            count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let bytes = vec![invalid_byte; count];
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "SSE2: High invalid bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.words, 0,
+                    "SSE2: Isolated invalid bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_high_invalid_start_bytes_avx2(
+            invalid_byte in 0xF5u8..=0xFFu8,
+            count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let bytes = vec![invalid_byte; count];
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "AVX2: High invalid bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.words, 0,
+                    "AVX2: Isolated invalid bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_high_invalid_start_bytes_avx512(
+            invalid_byte in 0xF5u8..=0xFFu8,
+            count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let bytes = vec![invalid_byte; count];
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "AVX512: High invalid bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.words, 0,
+                    "AVX512: Isolated invalid bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    // Property: Overlong encodings are invalid (SSE2)
+    proptest! {
+        #[test]
+        fn prop_overlong_encodings_invalid_sse2(
+            ascii_char in 0x00u8..=0x7Fu8
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let overlong = vec![
+                    0xC0 | (ascii_char >> 6),
+                    0x80 | (ascii_char & 0x3F),
+                ];
+
+                let result = unsafe { crate::wc_x86::count_text_sse2(&overlong, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "SSE2: Overlong encoding should not count as char, got {}", result.chars);
+                prop_assert_eq!(result.bytes, 2);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_overlong_encodings_invalid_avx2(
+            ascii_char in 0x00u8..=0x7Fu8
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let overlong = vec![
+                    0xC0 | (ascii_char >> 6),
+                    0x80 | (ascii_char & 0x3F),
+                ];
+
+                let result = unsafe { crate::wc_x86::count_text_avx2(&overlong, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "AVX2: Overlong encoding should not count as char, got {}", result.chars);
+                prop_assert_eq!(result.bytes, 2);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_overlong_encodings_invalid_avx512(
+            ascii_char in 0x00u8..=0x7Fu8
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let overlong = vec![
+                    0xC0 | (ascii_char >> 6),
+                    0x80 | (ascii_char & 0x3F),
+                ];
+
+                let result = unsafe { crate::wc_x86::count_text_avx512(&overlong, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "AVX512: Overlong encoding should not count as char, got {}", result.chars);
+                prop_assert_eq!(result.bytes, 2);
+            }
+        }
+    }
+
+    // Property: Random byte sequences - fundamental invariants (SSE2)
+    proptest! {
+        #[test]
+        fn prop_random_bytes_invariant_sse2(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert!(result.bytes >= result.chars,
+                    "SSE2: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+
+                prop_assert_eq!(result.bytes, bytes.len(),
+                    "SSE2: bytes must equal input length: {} != {}", result.bytes, bytes.len());
+
+                prop_assert!(result.lines <= result.chars,
+                    "SSE2: lines ({}) must be <= chars ({})", result.lines, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_random_bytes_invariant_avx2(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert!(result.bytes >= result.chars,
+                    "AVX2: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+
+                prop_assert_eq!(result.bytes, bytes.len(),
+                    "AVX2: bytes must equal input length: {} != {}", result.bytes, bytes.len());
+
+                prop_assert!(result.lines <= result.chars,
+                    "AVX2: lines ({}) must be <= chars ({})", result.lines, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_random_bytes_invariant_avx512(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert!(result.bytes >= result.chars,
+                    "AVX512: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+
+                prop_assert_eq!(result.bytes, bytes.len(),
+                    "AVX512: bytes must equal input length: {} != {}", result.bytes, bytes.len());
+
+                prop_assert!(result.lines <= result.chars,
+                    "AVX512: lines ({}) must be <= chars ({})", result.lines, result.chars);
+            }
+        }
+    }
+
+    // Property: Invalid bytes at SIMD boundaries (SSE2)
+    proptest! {
+        #[test]
+        fn prop_invalid_at_simd_boundaries_sse2(
+            boundary_size in prop::sample::select(vec![16usize, 32, 64]),
+            invalid_byte in 0x80u8..=0xFFu8
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let mut bytes = vec![b'a'; boundary_size - 1];
+                bytes.push(invalid_byte);
+
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SSE2: Should form 1 word at boundary {}, got {}", boundary_size, result.words);
+
+                prop_assert_eq!(result.chars, boundary_size - 1,
+                    "SSE2: Chars should be {}, got {}", boundary_size - 1, result.chars);
+
+                prop_assert_eq!(result.bytes, boundary_size);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_at_simd_boundaries_avx2(
+            boundary_size in prop::sample::select(vec![16usize, 32, 64]),
+            invalid_byte in 0x80u8..=0xFFu8
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let mut bytes = vec![b'a'; boundary_size - 1];
+                bytes.push(invalid_byte);
+
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX2: Should form 1 word at boundary {}, got {}", boundary_size, result.words);
+
+                prop_assert_eq!(result.chars, boundary_size - 1,
+                    "AVX2: Chars should be {}, got {}", boundary_size - 1, result.chars);
+
+                prop_assert_eq!(result.bytes, boundary_size);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_at_simd_boundaries_avx512(
+            boundary_size in prop::sample::select(vec![16usize, 32, 64]),
+            invalid_byte in 0x80u8..=0xFFu8
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let mut bytes = vec![b'a'; boundary_size - 1];
+                bytes.push(invalid_byte);
+
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX512: Should form 1 word at boundary {}, got {}", boundary_size, result.words);
+
+                prop_assert_eq!(result.chars, boundary_size - 1,
+                    "AVX512: Chars should be {}, got {}", boundary_size - 1, result.chars);
+
+                prop_assert_eq!(result.bytes, boundary_size);
+            }
+        }
+    }
+
+    // Property: Multiple invalid bytes between words (SSE2)
+    proptest! {
+        #[test]
+        fn prop_multiple_invalid_between_words_sse2(
+            word1 in "[a-z]{1,10}",
+            word2 in "[a-z]{1,10}",
+            invalid_count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let mut bytes = Vec::from(word1.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+                bytes.extend_from_slice(word2.as_bytes());
+
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SSE2: Multiple invalid bytes should join words, got {}", result.words);
+
+                let expected_chars = word1.len() + word2.len();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SSE2: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_multiple_invalid_between_words_avx2(
+            word1 in "[a-z]{1,10}",
+            word2 in "[a-z]{1,10}",
+            invalid_count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let mut bytes = Vec::from(word1.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+                bytes.extend_from_slice(word2.as_bytes());
+
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX2: Multiple invalid bytes should join words, got {}", result.words);
+
+                let expected_chars = word1.len() + word2.len();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX2: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_multiple_invalid_between_words_avx512(
+            word1 in "[a-z]{1,10}",
+            word2 in "[a-z]{1,10}",
+            invalid_count in 1usize..10
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let mut bytes = Vec::from(word1.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+                bytes.extend_from_slice(word2.as_bytes());
+
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "AVX512: Multiple invalid bytes should join words, got {}", result.words);
+
+                let expected_chars = word1.len() + word2.len();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "AVX512: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: C locale comprehensive (SSE2)
+    proptest! {
+        #[test]
+        fn prop_c_locale_comprehensive_sse2(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if is_x86_feature_detected!("sse2") {
+                let result = unsafe { crate::wc_x86::count_text_sse2(&bytes, LocaleEncoding::SingleByte) };
+
+                prop_assert_eq!(result.chars, result.bytes,
+                    "SSE2 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+
+                let expected_lines = bytes.iter().filter(|&&b| b == b'\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SSE2 C locale: lines ({}) must equal \\n count ({})", result.lines, expected_lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_c_locale_comprehensive_avx2(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if is_x86_feature_detected!("avx2") {
+                let result = unsafe { crate::wc_x86::count_text_avx2(&bytes, LocaleEncoding::SingleByte) };
+
+                prop_assert_eq!(result.chars, result.bytes,
+                    "AVX2 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+
+                let expected_lines = bytes.iter().filter(|&&b| b == b'\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX2 C locale: lines ({}) must equal \\n count ({})", result.lines, expected_lines);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_c_locale_comprehensive_avx512(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let result = unsafe { crate::wc_x86::count_text_avx512(&bytes, LocaleEncoding::SingleByte) };
+
+                prop_assert_eq!(result.chars, result.bytes,
+                    "AVX512 C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+
+                let expected_lines = bytes.iter().filter(|&&b| b == b'\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "AVX512 C locale: lines ({}) must equal \\n count ({})", result.lines, expected_lines);
+            }
+        }
+    }
 }

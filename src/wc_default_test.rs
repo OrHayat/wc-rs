@@ -1059,4 +1059,103 @@ pub mod tests {
                 "C locale: lines ({}) must equal \\n count ({})", result.lines, expected_lines);
         }
     }
+
+    // Property 21: UTF-8 char count matches Rust's char iterator for valid UTF-8
+    proptest! {
+        #[test]
+        fn prop_utf8_char_count_matches_scalar(input in "\\PC*") {
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
+            let expected_chars = input.chars().count();
+
+            prop_assert_eq!(result.chars, expected_chars,
+                "UTF-8 chars ({}) must match Rust's char count ({})", result.chars, expected_chars);
+        }
+    }
+
+    // Property 22: Empty input produces zero counts
+    proptest! {
+        #[test]
+        fn prop_empty_input_zero_counts_scalar(_seed in 0u32..1000u32) {
+            let result = word_count_scalar(&[], LocaleEncoding::Utf8);
+
+            prop_assert_eq!(result.lines, 0, "Empty: lines must be 0");
+            prop_assert_eq!(result.words, 0, "Empty: words must be 0");
+            prop_assert_eq!(result.chars, 0, "Empty: chars must be 0");
+            prop_assert_eq!(result.bytes, 0, "Empty: bytes must be 0");
+        }
+    }
+
+    // Property 23: Single character words separated by spaces are counted correctly
+    proptest! {
+        #[test]
+        fn prop_single_char_words_scalar(
+            char_count in 1usize..50,
+            separator in prop::sample::select(vec![' ', '\t', '\n'])
+        ) {
+            // Build: "a a a a" or "a\ta\ta" etc.
+            let mut bytes = Vec::new();
+            for i in 0..char_count {
+                bytes.push(b'a');
+                if i < char_count - 1 {
+                    bytes.push(separator as u8);
+                }
+            }
+
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            prop_assert_eq!(result.words, char_count,
+                "Single char words: expected {} words, got {}", char_count, result.words);
+
+            let expected_lines = if separator == '\n' { char_count - 1 } else { 0 };
+            prop_assert_eq!(result.lines, expected_lines,
+                "Lines should be {}, got {}", expected_lines, result.lines);
+        }
+    }
+
+    // Property 24: Multiple consecutive whitespace doesn't create extra words
+    proptest! {
+        #[test]
+        fn prop_no_words_between_whitespace_scalar(
+            whitespace_count in 1usize..20
+        ) {
+            let bytes = vec![b' '; whitespace_count];
+            let result = word_count_scalar(&bytes, LocaleEncoding::Utf8);
+
+            prop_assert_eq!(result.words, 0,
+                "Multiple whitespace: should have 0 words, got {}", result.words);
+            prop_assert_eq!(result.bytes, whitespace_count);
+            prop_assert_eq!(result.chars, whitespace_count);
+        }
+    }
+
+    // Property 25: Word boundaries are accurate - manual word count matches
+    proptest! {
+        #[test]
+        fn prop_word_boundaries_accurate_scalar(
+            words in prop::collection::vec("[a-z]{1,10}", 1..20)
+        ) {
+            // Build: "word1 word2 word3 ..."
+            let input = words.join(" ");
+            let result = word_count_scalar(input.as_bytes(), LocaleEncoding::Utf8);
+
+            prop_assert_eq!(result.words, words.len(),
+                "Word count should be {}, got {}", words.len(), result.words);
+            prop_assert_eq!(result.chars, input.len());
+            prop_assert_eq!(result.bytes, input.len());
+        }
+    }
+
+    // Property 26: Words at end without trailing whitespace are counted
+    proptest! {
+        #[test]
+        fn prop_words_at_end_no_trailing_scalar(
+            word in "[a-z]{1,20}"
+        ) {
+            let result = word_count_scalar(word.as_bytes(), LocaleEncoding::Utf8);
+
+            prop_assert_eq!(result.words, 1,
+                "Single word without trailing whitespace should be 1 word, got {}", result.words);
+            prop_assert_eq!(result.lines, 0, "No newline means 0 lines");
+        }
+    }
 }

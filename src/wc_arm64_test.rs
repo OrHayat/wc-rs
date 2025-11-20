@@ -404,6 +404,524 @@ mod tests {
     }
 
     // ====================================================================
+    // Additional Advanced Property Tests (matching wc_default_test.rs)
+    // ====================================================================
+
+    // Property: Invalid UTF-8 bytes join words (NEON)
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_joins_words_neon(
+            prefix in "[a-z]+",
+            invalid_byte in 0x80u8..=0xFFu8,
+            suffix in "[a-z]+"
+        ) {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(prefix.as_bytes());
+            bytes.push(invalid_byte);
+            bytes.extend_from_slice(suffix.as_bytes());
+
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.words, 1,
+                "NEON: Invalid UTF-8 byte 0x{:02X} should join words, got {} words", invalid_byte, result.words);
+
+            let expected_chars = prefix.chars().count() + suffix.chars().count();
+            prop_assert_eq!(result.chars, expected_chars,
+                "NEON: Invalid UTF-8: chars should be {} (prefix + suffix), got {}", expected_chars, result.chars);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_utf8_joins_words_sve(
+            prefix in "[a-z]+",
+            invalid_byte in 0x80u8..=0xFFu8,
+            suffix in "[a-z]+"
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let mut bytes = Vec::new();
+                bytes.extend_from_slice(prefix.as_bytes());
+                bytes.push(invalid_byte);
+                bytes.extend_from_slice(suffix.as_bytes());
+
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SVE: Invalid UTF-8 byte 0x{:02X} should join words, got {} words", invalid_byte, result.words);
+
+                let expected_chars = prefix.chars().count() + suffix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SVE: Invalid UTF-8: chars should be {} (prefix + suffix), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: Lone continuation bytes don't form words (NEON)
+    proptest! {
+        #[test]
+        fn prop_lone_continuation_bytes_neon(
+            continuation_byte in 0x80u8..=0xBFu8,
+            count in 1usize..10
+        ) {
+            let bytes = vec![continuation_byte; count];
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.words, 0,
+                "NEON: Lone continuation bytes should not form words, got {}", result.words);
+            prop_assert_eq!(result.chars, 0,
+                "NEON: Lone continuation bytes should not count as chars, got {}", result.chars);
+            prop_assert_eq!(result.bytes, count);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_lone_continuation_bytes_sve(
+            continuation_byte in 0x80u8..=0xBFu8,
+            count in 1usize..10
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let bytes = vec![continuation_byte; count];
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 0,
+                    "SVE: Lone continuation bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.chars, 0,
+                    "SVE: Lone continuation bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    // Property: Truncated UTF-8 sequences at end (NEON)
+    proptest! {
+        #[test]
+        fn prop_truncated_sequences_at_end_neon(
+            prefix in "[a-z]{0,20}",
+            start_byte in prop::sample::select(vec![
+                0xC2u8, 0xC3u8,  // 2-byte starts
+                0xE0u8, 0xE1u8,  // 3-byte starts
+                0xF0u8, 0xF1u8,  // 4-byte starts
+            ])
+        ) {
+            let mut bytes = Vec::from(prefix.as_bytes());
+            bytes.push(start_byte);
+
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.bytes, bytes.len());
+
+            let expected_chars = prefix.chars().count();
+            prop_assert_eq!(result.chars, expected_chars,
+                "NEON: Chars should be {} (prefix only), got {}", expected_chars, result.chars);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_truncated_sequences_at_end_sve(
+            prefix in "[a-z]{0,20}",
+            start_byte in prop::sample::select(vec![
+                0xC2u8, 0xC3u8,  // 2-byte starts
+                0xE0u8, 0xE1u8,  // 3-byte starts
+                0xF0u8, 0xF1u8,  // 4-byte starts
+            ])
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let mut bytes = Vec::from(prefix.as_bytes());
+                bytes.push(start_byte);
+
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.bytes, bytes.len());
+
+                let expected_chars = prefix.chars().count();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SVE: Chars should be {} (prefix only), got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: Invalid bytes don't increment line count (NEON)
+    proptest! {
+        #[test]
+        fn prop_invalid_bytes_no_lines_neon(
+            invalid_bytes in prop_vec(0x80u8..=0xFFu8, 1..50)
+        ) {
+            let result = unsafe { crate::wc_arm64::count_text_neon(&invalid_bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.lines, 0,
+                "NEON: Invalid bytes without \\n should have 0 lines, got {}", result.lines);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_bytes_no_lines_sve(
+            invalid_bytes in prop_vec(0x80u8..=0xFFu8, 1..50)
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(&invalid_bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.lines, 0,
+                    "SVE: Invalid bytes without \\n should have 0 lines, got {}", result.lines);
+            }
+        }
+    }
+
+    // Property: Mix of valid ASCII and invalid bytes (NEON)
+    proptest! {
+        #[test]
+        fn prop_mixed_ascii_invalid_neon(
+            valid in "[a-z]{1,20}",
+            invalid_count in 1usize..5
+        ) {
+            let mut bytes = Vec::from(valid.as_bytes());
+            for _ in 0..invalid_count {
+                bytes.push(0xFF);
+            }
+
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.words, 1,
+                "NEON: Valid + invalid should form 1 word, got {}", result.words);
+
+            prop_assert_eq!(result.chars, valid.len(),
+                "NEON: Chars should be {} (valid only), got {}", valid.len(), result.chars);
+
+            prop_assert_eq!(result.bytes, valid.len() + invalid_count);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_mixed_ascii_invalid_sve(
+            valid in "[a-z]{1,20}",
+            invalid_count in 1usize..5
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let mut bytes = Vec::from(valid.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SVE: Valid + invalid should form 1 word, got {}", result.words);
+
+                prop_assert_eq!(result.chars, valid.len(),
+                    "SVE: Chars should be {} (valid only), got {}", valid.len(), result.chars);
+
+                prop_assert_eq!(result.bytes, valid.len() + invalid_count);
+            }
+        }
+    }
+
+    // Property: Invalid bytes with newlines (NEON)
+    proptest! {
+        #[test]
+        fn prop_invalid_with_newlines_neon(
+            lines in prop::collection::vec("[a-z]{0,10}", 1..10)
+        ) {
+            let mut bytes = Vec::new();
+            for (i, line) in lines.iter().enumerate() {
+                bytes.extend_from_slice(line.as_bytes());
+                bytes.push(0xFF);
+                if i < lines.len() - 1 {
+                    bytes.push(b'\n');
+                }
+            }
+
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            let expected_lines = lines.len() - 1;
+            prop_assert_eq!(result.lines, expected_lines,
+                "NEON: Lines should be {}, got {}", expected_lines, result.lines);
+
+            let total_ascii: usize = lines.iter().map(|s| s.len()).sum();
+            let expected_chars = total_ascii + expected_lines;
+            prop_assert_eq!(result.chars, expected_chars,
+                "NEON: Chars should be {}, got {}", expected_chars, result.chars);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_with_newlines_sve(
+            lines in prop::collection::vec("[a-z]{0,10}", 1..10)
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let mut bytes = Vec::new();
+                for (i, line) in lines.iter().enumerate() {
+                    bytes.extend_from_slice(line.as_bytes());
+                    bytes.push(0xFF);
+                    if i < lines.len() - 1 {
+                        bytes.push(b'\n');
+                    }
+                }
+
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                let expected_lines = lines.len() - 1;
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SVE: Lines should be {}, got {}", expected_lines, result.lines);
+
+                let total_ascii: usize = lines.iter().map(|s| s.len()).sum();
+                let expected_chars = total_ascii + expected_lines;
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SVE: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: High invalid start bytes (0xF5-0xFF) (NEON)
+    proptest! {
+        #[test]
+        fn prop_high_invalid_start_bytes_neon(
+            invalid_byte in 0xF5u8..=0xFFu8,
+            count in 1usize..10
+        ) {
+            let bytes = vec![invalid_byte; count];
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.chars, 0,
+                "NEON: High invalid bytes should not count as chars, got {}", result.chars);
+            prop_assert_eq!(result.words, 0,
+                "NEON: Isolated invalid bytes should not form words, got {}", result.words);
+            prop_assert_eq!(result.bytes, count);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_high_invalid_start_bytes_sve(
+            invalid_byte in 0xF5u8..=0xFFu8,
+            count in 1usize..10
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let bytes = vec![invalid_byte; count];
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "SVE: High invalid bytes should not count as chars, got {}", result.chars);
+                prop_assert_eq!(result.words, 0,
+                    "SVE: Isolated invalid bytes should not form words, got {}", result.words);
+                prop_assert_eq!(result.bytes, count);
+            }
+        }
+    }
+
+    // Property: Overlong encodings are invalid (NEON)
+    proptest! {
+        #[test]
+        fn prop_overlong_encodings_invalid_neon(
+            ascii_char in 0x00u8..=0x7Fu8
+        ) {
+            let overlong = vec![
+                0xC0 | (ascii_char >> 6),
+                0x80 | (ascii_char & 0x3F),
+            ];
+
+            let result = unsafe { crate::wc_arm64::count_text_neon(&overlong, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.chars, 0,
+                "NEON: Overlong encoding should not count as char, got {}", result.chars);
+            prop_assert_eq!(result.bytes, 2);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_overlong_encodings_invalid_sve(
+            ascii_char in 0x00u8..=0x7Fu8
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let overlong = vec![
+                    0xC0 | (ascii_char >> 6),
+                    0x80 | (ascii_char & 0x3F),
+                ];
+
+                let result = unsafe { crate::wc_arm64::count_text_sve(&overlong, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.chars, 0,
+                    "SVE: Overlong encoding should not count as char, got {}", result.chars);
+                prop_assert_eq!(result.bytes, 2);
+            }
+        }
+    }
+
+    // Property: Random byte sequences - fundamental invariants (NEON)
+    proptest! {
+        #[test]
+        fn prop_random_bytes_invariant_neon(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert!(result.bytes >= result.chars,
+                "NEON: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+
+            prop_assert_eq!(result.bytes, bytes.len(),
+                "NEON: bytes must equal input length: {} != {}", result.bytes, bytes.len());
+
+            prop_assert!(result.lines <= result.chars,
+                "NEON: lines ({}) must be <= chars ({})", result.lines, result.chars);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_random_bytes_invariant_sve(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert!(result.bytes >= result.chars,
+                    "SVE: bytes ({}) must be >= chars ({})", result.bytes, result.chars);
+
+                prop_assert_eq!(result.bytes, bytes.len(),
+                    "SVE: bytes must equal input length: {} != {}", result.bytes, bytes.len());
+
+                prop_assert!(result.lines <= result.chars,
+                    "SVE: lines ({}) must be <= chars ({})", result.lines, result.chars);
+            }
+        }
+    }
+
+    // Property: Invalid bytes at SIMD boundaries (NEON)
+    proptest! {
+        #[test]
+        fn prop_invalid_at_simd_boundaries_neon(
+            boundary_size in prop::sample::select(vec![16usize, 32, 64]),
+            invalid_byte in 0x80u8..=0xFFu8
+        ) {
+            let mut bytes = vec![b'a'; boundary_size - 1];
+            bytes.push(invalid_byte);
+
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.words, 1,
+                "NEON: Should form 1 word at boundary {}, got {}", boundary_size, result.words);
+
+            prop_assert_eq!(result.chars, boundary_size - 1,
+                "NEON: Chars should be {}, got {}", boundary_size - 1, result.chars);
+
+            prop_assert_eq!(result.bytes, boundary_size);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_invalid_at_simd_boundaries_sve(
+            boundary_size in prop::sample::select(vec![16usize, 32, 64]),
+            invalid_byte in 0x80u8..=0xFFu8
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let mut bytes = vec![b'a'; boundary_size - 1];
+                bytes.push(invalid_byte);
+
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SVE: Should form 1 word at boundary {}, got {}", boundary_size, result.words);
+
+                prop_assert_eq!(result.chars, boundary_size - 1,
+                    "SVE: Chars should be {}, got {}", boundary_size - 1, result.chars);
+
+                prop_assert_eq!(result.bytes, boundary_size);
+            }
+        }
+    }
+
+    // Property: Multiple invalid bytes between words (NEON)
+    proptest! {
+        #[test]
+        fn prop_multiple_invalid_between_words_neon(
+            word1 in "[a-z]{1,10}",
+            word2 in "[a-z]{1,10}",
+            invalid_count in 1usize..10
+        ) {
+            let mut bytes = Vec::from(word1.as_bytes());
+            for _ in 0..invalid_count {
+                bytes.push(0xFF);
+            }
+            bytes.extend_from_slice(word2.as_bytes());
+
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::Utf8) };
+
+            prop_assert_eq!(result.words, 1,
+                "NEON: Multiple invalid bytes should join words, got {}", result.words);
+
+            let expected_chars = word1.len() + word2.len();
+            prop_assert_eq!(result.chars, expected_chars,
+                "NEON: Chars should be {}, got {}", expected_chars, result.chars);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_multiple_invalid_between_words_sve(
+            word1 in "[a-z]{1,10}",
+            word2 in "[a-z]{1,10}",
+            invalid_count in 1usize..10
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let mut bytes = Vec::from(word1.as_bytes());
+                for _ in 0..invalid_count {
+                    bytes.push(0xFF);
+                }
+                bytes.extend_from_slice(word2.as_bytes());
+
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::Utf8) };
+
+                prop_assert_eq!(result.words, 1,
+                    "SVE: Multiple invalid bytes should join words, got {}", result.words);
+
+                let expected_chars = word1.len() + word2.len();
+                prop_assert_eq!(result.chars, expected_chars,
+                    "SVE: Chars should be {}, got {}", expected_chars, result.chars);
+            }
+        }
+    }
+
+    // Property: C locale comprehensive (NEON)
+    proptest! {
+        #[test]
+        fn prop_c_locale_comprehensive_neon(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            let result = unsafe { crate::wc_arm64::count_text_neon(&bytes, LocaleEncoding::SingleByte) };
+
+            prop_assert_eq!(result.chars, result.bytes,
+                "NEON C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+
+            let expected_lines = bytes.iter().filter(|&&b| b == b'\n').count();
+            prop_assert_eq!(result.lines, expected_lines,
+                "NEON C locale: lines ({}) must equal \\n count ({})", result.lines, expected_lines);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_c_locale_comprehensive_sve(
+            bytes in prop_vec(0u8..=255u8, 1..200)
+        ) {
+            if std::arch::is_aarch64_feature_detected!("sve") {
+                let result = unsafe { crate::wc_arm64::count_text_sve(&bytes, LocaleEncoding::SingleByte) };
+
+                prop_assert_eq!(result.chars, result.bytes,
+                    "SVE C locale: chars ({}) must equal bytes ({})", result.chars, result.bytes);
+
+                let expected_lines = bytes.iter().filter(|&&b| b == b'\n').count();
+                prop_assert_eq!(result.lines, expected_lines,
+                    "SVE C locale: lines ({}) must equal \\n count ({})", result.lines, expected_lines);
+            }
+        }
+    }
+
+    // ====================================================================
     // UTF-8 Chunk Boundary Tests
     // ====================================================================
 
