@@ -63,10 +63,10 @@ fn chrono_lite_date() -> String {
 
 /// Attempts to build SVE C code if the toolchain supports it
 fn build_sve_if_available() {
-    println!("cargo:rerun-if-changed=src/wc_arm64_sve.c");
+    println!("cargo:rerun-if-changed=src/lib/wc_arm64_sve.c");
 
     let mut build = cc::Build::new();
-    build.file("src/wc_arm64_sve.c");
+    build.file("src/lib/wc_arm64_sve.c");
 
     // Test if this compiler can compile SVE before proceeding
     if !can_compile_sve(&build.get_compiler()) {
