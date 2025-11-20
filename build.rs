@@ -1,4 +1,7 @@
 fn main() {
+    // Declare custom cfg flag for SVE availability
+    println!("cargo::rustc-check-cfg=cfg(sve_available)");
+
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
     if target_arch == "aarch64" {
@@ -84,6 +87,12 @@ fn build_sve_if_available() {
     }
 
     build.compile("wc_arm64_sve");
+
+    // Tell downstream crates to link this library
+    println!("cargo:rustc-link-lib=static=wc_arm64_sve");
+
+    // Enable the 'sve_available' cfg flag so Rust code knows SVE was built
+    println!("cargo:rustc-cfg=sve_available");
 
     if coverage_enabled {
         link_coverage_libraries(&build);

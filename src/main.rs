@@ -87,7 +87,8 @@ pub enum CountingBackend {
     Avx2,
     /// SSE2 128-bit vectors (x86_64)
     Sse2,
-    /// ARM SVE scalable vectors (aarch64)
+    /// ARM SVE scalable vectors (aarch64) - only available if C library compiled successfully
+    #[cfg(sve_available)]
     Sve,
     /// ARM NEON 128-bit vectors (aarch64)
     Neon,
@@ -101,6 +102,7 @@ impl std::fmt::Display for CountingBackend {
             CountingBackend::Avx512 => write!(f, "AVX-512"),
             CountingBackend::Avx2 => write!(f, "AVX2"),
             CountingBackend::Sse2 => write!(f, "SSE2"),
+            #[cfg(sve_available)]
             CountingBackend::Sve => write!(f, "SVE"),
             CountingBackend::Neon => write!(f, "NEON"),
             CountingBackend::Scalar => write!(f, "Scalar"),
@@ -118,7 +120,7 @@ impl CountingBackend {
             CountingBackend::Avx2 => unsafe { wc_x86::count_text_avx2(content, locale) },
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             CountingBackend::Sse2 => unsafe { wc_x86::count_text_sse2(content, locale) },
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", sve_available))]
             CountingBackend::Sve => unsafe { wc_arm64::count_text_sve(content, locale) },
             #[cfg(target_arch = "aarch64")]
             CountingBackend::Neon => unsafe { wc_arm64::count_text_neon(content, locale) },
@@ -142,9 +144,12 @@ fn detect_simd_path() -> CountingBackend {
 
     #[cfg(target_arch = "aarch64")]
     {
+        #[cfg(sve_available)]
         if std::arch::is_aarch64_feature_detected!("sve") {
             return CountingBackend::Sve;
-        } else if std::arch::is_aarch64_feature_detected!("neon") {
+        }
+
+        if std::arch::is_aarch64_feature_detected!("neon") {
             return CountingBackend::Neon;
         }
     }

@@ -1,5 +1,6 @@
 #[cfg(test)]
 #[cfg(target_arch = "aarch64")]
+#[cfg(sve_available)]
 mod tests {
     use crate::wc_default_test::tests::common_word_count_cases;
     use crate::wc_default_test::tests::counts;

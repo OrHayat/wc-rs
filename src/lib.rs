@@ -53,7 +53,7 @@ impl CountingBackend {
             CountingBackend::Avx2 => unsafe { wc_x86::count_text_avx2(content, locale) },
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             CountingBackend::Sse2 => unsafe { wc_x86::count_text_sse2(content, locale) },
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", sve_available))]
             CountingBackend::Sve => unsafe { wc_arm64::count_text_sve(content, locale) },
             #[cfg(target_arch = "aarch64")]
             CountingBackend::Neon => unsafe { wc_arm64::count_text_neon(content, locale) },

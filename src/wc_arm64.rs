@@ -8,7 +8,9 @@ use crate::wc_default;
 // ============================================================================
 // SVE FFI Declarations (C implementation)
 // ============================================================================
+// Only include SVE FFI if the C library was successfully built
 
+#[cfg(sve_available)]
 mod sve_ffi {
     use crate::FileCounts;
 
@@ -19,6 +21,7 @@ mod sve_ffi {
         pub success: bool,
     }
 
+    #[link(name = "wc_arm64_sve", kind = "static")]
     unsafe extern "C" {
         // Checked version: safe, verifies CPU supports SVE
         #[allow(dead_code)]
@@ -37,6 +40,7 @@ mod sve_ffi {
     }
 }
 
+#[cfg(sve_available)]
 pub(crate) unsafe fn count_text_sve(content: &[u8], locale: LocaleEncoding) -> FileCounts {
     let locale_byte = match locale {
         LocaleEncoding::SingleByte => 0,
