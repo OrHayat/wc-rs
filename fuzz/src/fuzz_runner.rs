@@ -133,6 +133,7 @@ impl FuzzRunner {
             println!("📊 Iteration {} - {}", iteration, Local::now().format("%H:%M:%S"));
             println!("=========================================");
 
+            let mut compilation_failed = false;
             for target in &self.targets.clone() {
                 if self.stop_signal.load(Ordering::Relaxed) {
                     println!("\n🛑 Stop signal received, finishing current iteration...");
@@ -140,6 +141,12 @@ impl FuzzRunner {
                 }
 
                 let stats = self.run_target(target, iteration);
+
+                // Check for compilation failure
+                if stats.exit_code != 0 && stats.coverage.is_none() && stats.crashes_found == 0 {
+                    compilation_failed = true;
+                }
+
                 self.session_stats.runs.push(stats.clone());
                 self.session_stats.total_runs += 1;
 
@@ -148,6 +155,13 @@ impl FuzzRunner {
 
                 // Save stats to file
                 self.save_stats(&stats_file);
+
+                // Stop immediately on compilation failure
+                if compilation_failed {
+                    eprintln!("\n🛑 Stopping due to compilation failure. Fix the errors and try again.");
+                    self.stop_signal.store(true, Ordering::Relaxed);
+                    break;
+                }
             }
 
             if !self.stop_signal.load(Ordering::Relaxed) {
@@ -194,7 +208,6 @@ impl FuzzRunner {
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let output = cmd.spawn();
-
         let mut coverage = None;
         let mut exec_per_sec = None;
 
@@ -238,6 +251,17 @@ impl FuzzRunner {
                 if crashes_found > 0 {
                     println!("🚨 CRASH FOUND! {} crash(es) in artifacts/{}", crashes_found, target);
                     self.session_stats.total_crashes += crashes_found;
+                }
+
+                // Check if compilation/execution failed
+                // If we got coverage info, the fuzzer ran successfully (even if it found crashes)
+                // If exit_code != 0 AND no coverage, likely compilation failure
+                if exit_code != 0 && coverage.is_none() && crashes_found == 0 {
+                    eprintln!("❌ Target '{}' failed with exit code {}", target, exit_code);
+                    eprintln!("   No coverage data collected - likely compilation or startup failure.");
+                    eprintln!("   Try running: cargo fuzz run {}", target);
+                } else if exit_code != 0 && crashes_found > 0 {
+                    println!("✓ Fuzzer exited with code {} after finding crashes (expected)", exit_code);
                 }
 
                 RunStats {
