@@ -1,13 +1,7 @@
-// SKIPPED/IGNORED - TODO: Fix this test next
-// Issues to resolve:
-// 1. Private marker struct is not exposed
-// 2. CountingBackend::new_scalar() doesn't exist - need to use detect() or add test-only constructor
-
-/*
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use wc_rs::{CountingBackend, LocaleEncoding, Private};
+use wc_rs::{CountingBackend, LocaleEncoding};
 
 fuzz_target!(|data: &[u8]| {
     // Test word boundary detection with challenging inputs
@@ -18,7 +12,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Test with the data as-is
-    let result = CountingBackend::new_scalar().count_text(data, LocaleEncoding::Utf8);
+    let result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(data, LocaleEncoding::Utf8);
 
     // Basic invariants
     assert!(result.words <= result.bytes, "words cannot exceed bytes");
@@ -63,12 +57,11 @@ fuzz_target!(|data: &[u8]| {
 
     // Test all generated cases
     for test_case in &test_cases {
-        let result = CountingBackend::new_scalar().count_text(test_case, LocaleEncoding::Utf8);
+        let result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(test_case, LocaleEncoding::Utf8);
         assert!(result.words <= result.bytes, "words cannot exceed bytes in generated case");
 
         // Also test SingleByte mode
-        let sb_result = CountingBackend::new_scalar().count_text(test_case, LocaleEncoding::SingleByte);
+        let sb_result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(test_case, LocaleEncoding::SingleByte);
         assert!(sb_result.words <= sb_result.bytes, "words cannot exceed bytes in SingleByte mode");
     }
 });
-*/

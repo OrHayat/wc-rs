@@ -8,7 +8,7 @@ fuzz_target!(|data: &[u8]| {
     // This catches bugs where SIMD optimizations don't match the scalar code
 
     // Get scalar result as the reference
-    let scalar_backend = CountingBackend::new_scalar_unchecked();
+    let scalar_backend = unsafe { CountingBackend::new_scalar_unchecked() };
     let scalar_utf8 = scalar_backend.count_text(data, LocaleEncoding::Utf8);
     let scalar_single = scalar_backend.count_text(data, LocaleEncoding::SingleByte);
 

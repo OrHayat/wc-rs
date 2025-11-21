@@ -44,3 +44,17 @@ path = "fuzz_targets/fuzz_simd_consistency.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_counter_overflow"
+path = "fuzz_targets/fuzz_counter_overflow.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_word_boundaries"
+path = "fuzz_targets/fuzz_word_boundaries.rs"
+test = false
+doc = false
+bench = false

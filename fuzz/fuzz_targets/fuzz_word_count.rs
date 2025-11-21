@@ -7,7 +7,7 @@ fuzz_target!(|data: &[u8]| {
     // Test word counting with arbitrary byte sequences in both locale modes
     // This will catch panics, overflows, and logic errors
 
-    let backend = CountingBackend::new_scalar_unchecked();
+    let backend = unsafe { CountingBackend::new_scalar_unchecked() };
 
     // Test UTF-8 mode
     let _ = backend.count_text(data, LocaleEncoding::Utf8);

@@ -1,8 +1,7 @@
-/*
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use wc_rs::{CountingBackend, LocaleEncoding, Private};
+use wc_rs::{CountingBackend, LocaleEncoding};
 
 fuzz_target!(|data: &[u8]| {
     // Test counter overflow scenarios
@@ -13,7 +12,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Test with the input as-is
-    let result = CountingBackend::new_scalar().count_text(data, LocaleEncoding::Utf8);
+    let result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(data, LocaleEncoding::Utf8);
 
     // Basic invariants that should hold even near overflow
     assert!(result.chars <= result.bytes, "chars cannot exceed bytes");
@@ -61,7 +60,7 @@ fuzz_target!(|data: &[u8]| {
     test_cases.push(vec![b'a'; data.len().min(100000)]);
 
     // 7. Edge case: single very long word
-    let mut long_word = data.iter()
+    let long_word = data.iter()
         .filter(|&&b| b != b' ' && b != b'\n' && b != b'\t' && b != b'\r')
         .take(50000)
         .copied()
@@ -72,8 +71,8 @@ fuzz_target!(|data: &[u8]| {
 
     // Test all scenarios
     for test_case in &test_cases {
-        let utf8_result = CountingBackend::new_scalar().count_text(test_case, LocaleEncoding::Utf8);
-        let sb_result = CountingBackend::new_scalar().count_text(test_case, LocaleEncoding::SingleByte);
+        let utf8_result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(test_case, LocaleEncoding::Utf8);
+        let sb_result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(test_case, LocaleEncoding::SingleByte);
 
         // Verify invariants hold
         assert!(utf8_result.chars <= utf8_result.bytes, "UTF-8: chars > bytes");
@@ -105,8 +104,7 @@ fuzz_target!(|data: &[u8]| {
     let simd_result = backend.count_text(data, LocaleEncoding::Utf8);
 
     // SIMD result should match scalar
-    let scalar_result = CountingBackend::new_scalar().count_text(data, LocaleEncoding::Utf8);
+    let scalar_result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(data, LocaleEncoding::Utf8);
     assert_eq!(simd_result, scalar_result, "SIMD/scalar mismatch on overflow test");
 });
-*/
 

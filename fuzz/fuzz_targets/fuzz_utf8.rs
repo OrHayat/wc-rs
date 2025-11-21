@@ -8,7 +8,7 @@ fuzz_target!(|data: &[u8]| {
     // This specifically targets UTF-8 boundary detection and character counting
 
     // Run the UTF-8 word counter - should handle all invalid UTF-8 gracefully
-    let result = CountingBackend::new_scalar_unchecked().count_text(data, LocaleEncoding::Utf8);
+    let result = unsafe { CountingBackend::new_scalar_unchecked() }.count_text(data, LocaleEncoding::Utf8);
 
     // Verify basic invariants
     assert!(result.chars <= result.bytes, "chars cannot exceed bytes");

@@ -78,6 +78,8 @@ impl FuzzRunner {
                 "fuzz_word_count".to_string(),
                 "fuzz_utf8".to_string(),
                 "fuzz_simd_consistency".to_string(),
+                "fuzz_counter_overflow".to_string(),
+                "fuzz_word_boundaries".to_string(),
             ],
             time_per_run,
             corpus_path: PathBuf::from("corpus/shared"),
