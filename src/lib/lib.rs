@@ -128,6 +128,65 @@ impl CountingBackend {
         CountingBackend::Scalar(Private)
     }
 
+    /// Construct a Scalar backend.
+    ///
+    /// # Safety
+    ///
+    /// This bypasses the normal safety checks that prevent construction
+    /// of backends without CPU feature detection.
+    ///
+    /// Scalar backend is safe on all CPUs.
+    ///
+    /// # Example
+    /// ```ignore
+    /// unsafe {
+    ///     let backend = CountingBackend::new_scalar_unchecked();
+    ///     let result = backend.count_text(b"test", LocaleEncoding::Utf8);
+    /// }
+    /// ```
+    pub unsafe fn new_scalar_unchecked() -> Self {
+        CountingBackend::Scalar(Private)
+    }
+
+    /// Construct specific backends for consistency testing.
+    ///
+    /// # Safety
+    ///
+    /// **DANGER**: Caller MUST verify the CPU supports the requested feature
+    /// BEFORE calling `count_text()`, or the program will crash with SIGILL
+    /// (illegal instruction).
+    ///
+    /// Always guard usage with CPU feature detection:
+    ///
+    /// # Example
+    /// ```ignore
+    /// #[cfg(target_arch = "x86_64")]
+    /// if is_x86_feature_detected!("avx2") {
+    ///     let backend = CountingBackend::new_unchecked("avx2").unwrap();
+    ///     // Safe to use now - we verified AVX2 support
+    ///     let result = backend.count_text(data, LocaleEncoding::Utf8);
+    /// }
+    /// ```
+    ///
+    /// # Parameters
+    /// - `backend_type`: One of: "scalar", "sse2", "avx2", "avx512", "neon", "sve"
+    ///
+    /// # Returns
+    /// - `Some(backend)` if the backend name is valid
+    /// - `None` if the backend name is invalid
+    #[cfg(fuzzing)]
+    pub fn new_unchecked(backend_type: &str) -> Option<Self> {
+        match backend_type {
+            "scalar" => Some(CountingBackend::Scalar(Private)),
+            "sse2" => Some(CountingBackend::Sse2(Private)),
+            "avx2" => Some(CountingBackend::Avx2(Private)),
+            "avx512" => Some(CountingBackend::Avx512(Private)),
+            "neon" => Some(CountingBackend::Neon(Private)),
+            "sve" => Some(CountingBackend::Sve(Private)),
+            _ => None,
+        }
+    }
+
     /// Count text statistics using this SIMD path.
     ///
     /// # Safety
