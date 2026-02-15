@@ -215,7 +215,7 @@ unsafe fn avx512_detect_whitespace(chunk: __m512i) -> u64 {
     let is_space = _mm512_cmpeq_epi8_mask(chunk, space);
 
     // Combine
-    (in_range | is_space)
+    in_range | is_space
 }
 
 // ============================================================================
