@@ -36,7 +36,7 @@ unsafe fn sse2_has_non_ascii(chunk: __m128i) -> bool {
     // Bytes >= 0x80 will be negative in signed interpretation, so we need to check if any byte > 0x7F
     // Using signed comparison: 0x80-0xFF are negative, 0x00-0x7F are positive
     // So we want to check if any byte > 0x7F (positive) OR any byte is negative (>= 0x80)
-    let threshold = _mm_set1_epi8(0x7F as i8);
+    let threshold = _mm_set1_epi8(0x7F_i8);
     let cmp = _mm_cmpgt_epi8(chunk, threshold);
     let mask = _mm_movemask_epi8(cmp);
 
@@ -105,7 +105,7 @@ unsafe fn avx2_count_newlines(chunk: __m256i) -> usize {
 #[target_feature(enable = "avx2")]
 #[inline]
 unsafe fn avx2_has_non_ascii(chunk: __m256i) -> bool {
-    let threshold = _mm256_set1_epi8(0x7F as i8);
+    let threshold = _mm256_set1_epi8(0x7F_i8);
     let cmp = _mm256_cmpgt_epi8(chunk, threshold);
     let mask = _mm256_movemask_epi8(cmp);
 
@@ -173,7 +173,7 @@ unsafe fn avx512_count_newlines(chunk: __m512i) -> usize {
 #[target_feature(enable = "avx512bw")]
 #[inline]
 unsafe fn avx512_has_non_ascii(chunk: __m512i) -> bool {
-    let threshold = _mm512_set1_epi8(0x7F as i8);
+    let threshold = _mm512_set1_epi8(0x7F_i8);
     let mask = _mm512_cmpgt_epi8_mask(chunk, threshold);
 
     // Also check for negative bytes (>= 0x80) by checking if MSB is set
@@ -215,7 +215,7 @@ unsafe fn avx512_detect_whitespace(chunk: __m512i) -> u64 {
     let is_space = _mm512_cmpeq_epi8_mask(chunk, space);
 
     // Combine
-    (in_range | is_space) as u64
+    (in_range | is_space)
 }
 
 // ============================================================================
