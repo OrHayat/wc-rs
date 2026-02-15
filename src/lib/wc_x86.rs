@@ -12,7 +12,6 @@ use crate::FileCounts;
 use crate::LocaleEncoding;
 use crate::wc_default;
 
-
 // ============================================================================
 // SSE2 Helper Functions - Reusable for AVX2/AVX-512
 // ============================================================================

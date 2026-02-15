@@ -4,8 +4,8 @@ mod tests {
     use crate::wc_default_test::tests::{common_word_count_cases, counts};
     use crate::{FileCounts, LocaleEncoding};
     use pretty_assertions::assert_eq;
-    use proptest::prelude::*;
     use proptest::collection::vec as prop_vec;
+    use proptest::prelude::*;
     use rstest::rstest;
     use rstest_reuse;
     use rstest_reuse::*;

@@ -1,9 +1,8 @@
-
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
-use crate::{FileCounts, LocaleEncoding};
 use crate::wc_default;
+use crate::{FileCounts, LocaleEncoding};
 
 // ============================================================================
 // SVE FFI Declarations (C implementation)
@@ -32,11 +31,8 @@ mod sve_ffi {
         ) -> FileCountsResult;
 
         // Unchecked version: assumes SVE is available
-        pub fn count_text_sve_c_unchecked(
-            content: *const u8,
-            len: usize,
-            locale: u8,
-        ) -> FileCounts;
+        pub fn count_text_sve_c_unchecked(content: *const u8, len: usize, locale: u8)
+        -> FileCounts;
     }
 }
 
@@ -47,9 +43,7 @@ pub(crate) unsafe fn count_text_sve(content: &[u8], locale: LocaleEncoding) -> F
         LocaleEncoding::Utf8 => 1,
     };
 
-    unsafe {
-        sve_ffi::count_text_sve_c_unchecked(content.as_ptr(), content.len(), locale_byte)
-    }
+    unsafe { sve_ffi::count_text_sve_c_unchecked(content.as_ptr(), content.len(), locale_byte) }
 }
 
 // ============================================================================
@@ -243,8 +237,6 @@ pub(crate) unsafe fn count_text_neon(content: &[u8], locale: LocaleEncoding) -> 
 
     result_acc
 }
-
-
 
 #[doc(hidden)]
 #[allow(dead_code)]

@@ -983,12 +983,14 @@ mod tests {
         }
 
         let content = build_boundary_content(padding, utf8_char);
-        let result = unsafe {
-            sve_ffi_test::count_text_sve_c_unchecked(content.as_ptr(), content.len(), 1)
-        };
+        let result =
+            unsafe { sve_ffi_test::count_text_sve_c_unchecked(content.as_ptr(), content.len(), 1) };
         let expected = crate::wc_default::word_count_scalar(&content, LocaleEncoding::Utf8);
 
-        assert_eq!(result.chars, expected.chars,
-            "{}: C direct chars mismatch (BUG: skips boundary chars)", desc);
+        assert_eq!(
+            result.chars, expected.chars,
+            "{}: C direct chars mismatch (BUG: skips boundary chars)",
+            desc
+        );
     }
 }

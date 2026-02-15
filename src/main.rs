@@ -64,7 +64,8 @@ fn detect_locale() -> LocaleEncoding {
         || locale_upper.contains("LATIN1")
         || locale_upper.contains("LATIN-1")
         || locale_upper.contains("ISO-8859")
-        || locale_upper.contains("ISO8859") {
+        || locale_upper.contains("ISO8859")
+    {
         LocaleEncoding::SingleByte
     } else {
         // Default to UTF-8 for all other locales
@@ -252,7 +253,8 @@ fn process_files(args: &WordCountArgs, locale: LocaleEncoding, thread_count: usi
         .install(|| {
             // Process files in parallel, preserving order
             // Returns Result<FileCounts> for success, or error message for failure
-            let results: Vec<Result<FileCounts>> = args.files
+            let results: Vec<Result<FileCounts>> = args
+                .files
                 .par_iter()
                 .map(|file_path| {
                     // Check if this is stdin
@@ -422,7 +424,7 @@ fn read_files0_from(path: &PathBuf) -> Result<Vec<PathBuf>> {
             // Convert bytes to PathBuf
             #[cfg(unix)]
             {
-                use std::{os::unix::ffi::OsStrExt};
+                use std::os::unix::ffi::OsStrExt;
                 PathBuf::from(std::ffi::OsStr::from_bytes(s))
             }
             #[cfg(not(unix))]
@@ -435,4 +437,3 @@ fn read_files0_from(path: &PathBuf) -> Result<Vec<PathBuf>> {
 
     Ok(files)
 }
-

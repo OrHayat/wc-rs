@@ -70,7 +70,9 @@ fn build_sve_if_available() {
 
     // Test if this compiler can compile SVE before proceeding
     if !can_compile_sve(&build.get_compiler()) {
-        println!("cargo:warning=ARM64 detected but cannot compile SVE (missing headers or toolchain support)");
+        println!(
+            "cargo:warning=ARM64 detected but cannot compile SVE (missing headers or toolchain support)"
+        );
         return;
     }
 
@@ -102,8 +104,12 @@ fn build_sve_if_available() {
 /// Checks if coverage instrumentation is enabled
 fn is_coverage_enabled() -> bool {
     std::env::var("CARGO_LLVM_COV").is_ok()
-        || std::env::var("RUSTFLAGS").unwrap_or_default().contains("instrument-coverage")
-        || std::env::var("RUSTFLAGS").unwrap_or_default().contains("profile-generate")
+        || std::env::var("RUSTFLAGS")
+            .unwrap_or_default()
+            .contains("instrument-coverage")
+        || std::env::var("RUSTFLAGS")
+            .unwrap_or_default()
+            .contains("profile-generate")
 }
 
 /// Configures coverage instrumentation flags based on the compiler
@@ -179,18 +185,14 @@ int main() {
 
     let result = compiler
         .to_command()
-        .args([
-            "-march=armv8.2-a+sve",
-            "-c",
-            &test_file,
-            "-o",
-            &test_obj,
-        ])
+        .args(["-march=armv8.2-a+sve", "-c", &test_file, "-o", &test_obj])
         .output();
 
     // Clean up
     let _ = std::fs::remove_file(&test_file);
     let _ = std::fs::remove_file(&test_obj);
 
-    result.map(|output| output.status.success()).unwrap_or(false)
+    result
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }

@@ -270,7 +270,6 @@ pub mod tests {
         LocaleEncoding::Utf8,
         counts(0, 2, 37, 40)
     )]
-
     // === 64-byte boundary splits ===
     // 62 ASCII + 3-byte em-space: split as [62,63] | [64] (E2 80 | 83)
     #[case::chunk_boundary_64_3byte_split_2_1(
@@ -302,7 +301,6 @@ pub mod tests {
         LocaleEncoding::Utf8,
         counts(0, 2, 69, 72)
     )]
-
     // === 128-byte boundary splits ===
     // 126 ASCII + 3-byte em-space: split as [126,127] | [128] (E2 80 | 83)
     #[case::chunk_boundary_128_3byte_split_2_1(
@@ -407,7 +405,11 @@ pub mod tests {
         counts(0, 1, 12, 12)
     )] // nbsp not recognized
     // C locale with ASCII >= 16 bytes (tests SIMD path on ARM64 NEON)
-    #[case::c_locale_ascii_16_bytes("abcdefghijklmnop", LocaleEncoding::SingleByte, counts(0, 1, 16, 16))] // Exactly 16 bytes
+    #[case::c_locale_ascii_16_bytes(
+        "abcdefghijklmnop",
+        LocaleEncoding::SingleByte,
+        counts(0, 1, 16, 16)
+    )] // Exactly 16 bytes
     #[case::c_locale_ascii_32_bytes(
         "hello world test data here!!",
         LocaleEncoding::SingleByte,
