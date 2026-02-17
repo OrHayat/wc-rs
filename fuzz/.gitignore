@@ -1,0 +1,11 @@
+target/
+corpus/
+artifacts/
+coverage/
+logs/
+
+# Don't commit wrapper scripts
+fuzz-runner
+
+# Keep seeds directory tracked (hand-crafted test cases)
+!seeds/

@@ -1,0 +1,60 @@
+[package]
+name = "wc-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+signal-hook = "0.3"
+clap = { version = "4.5", features = ["derive"] }
+
+[dependencies.wc-rs]
+path = ".."
+
+# Fuzz runner CLI
+[[bin]]
+name = "fuzz-runner"
+path = "src/fuzz_runner.rs"
+
+# Fuzz targets
+[[bin]]
+name = "fuzz_word_count"
+path = "fuzz_targets/fuzz_word_count.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_utf8"
+path = "fuzz_targets/fuzz_utf8.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_simd_consistency"
+path = "fuzz_targets/fuzz_simd_consistency.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_counter_overflow"
+path = "fuzz_targets/fuzz_counter_overflow.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_word_boundaries"
+path = "fuzz_targets/fuzz_word_boundaries.rs"
+test = false
+doc = false
+bench = false

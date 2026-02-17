@@ -1,0 +1,28 @@
+[package]
+name = "wc-rs"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A fast, SIMD-optimized word count utility"
+repository = "https://github.com/orhayat/wc-rs"
+keywords = ["cli", "wc", "simd", "text", "word-count"]
+categories = ["command-line-utilities", "text-processing"]
+
+[lib]
+path = "src/lib/lib.rs"
+
+[dependencies]
+thiserror = "2.0.17"
+clap = { version = "4.5.51", features = ["derive"] }
+num_cpus = "1.16.0"
+rayon = "1.11.0"
+
+[build-dependencies]
+cc = "1.2.45"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+rstest_reuse = "0.7.0"
+etest = "0.3.1"
+proptest = "1.9.0"

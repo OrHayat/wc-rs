@@ -1,0 +1,3 @@
+Hello 世界 🌍
+Test UTF-8: café résumé naïve
+Emoji: 👋🏼 🚀 ❤️
