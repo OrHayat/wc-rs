@@ -38,8 +38,6 @@ jobs:
             runner: ubuntu-24.04-arm
           - name: macOS ARM64
             runner: macos-latest
-          - name: macOS x86_64
-            runner: macos-13
           - name: Windows x86_64
             runner: windows-latest
     steps:
